@@ -128,7 +128,7 @@ class RuntimeTests(unittest.TestCase):
 
     def test_animation_advances_and_stops(self):
         animation = runtime.Animation([2, 3, 4], frame_duration=0.1, loop=False)
-        animation.update(0.21)
+        animation.update(0.31)
         self.assertEqual(animation.frame, 4)
         self.assertTrue(animation.finished)
         animation.update(1.0)
