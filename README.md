@@ -39,9 +39,13 @@ A game file exports `create_game()`, returning an object with:
 - `update(dt, inputs)`: optional; called each frame. `dt` is elapsed seconds.
 - `draw(surface)`: required; draws to a 640×480 Pygame surface.
 
-The shared input object exposes `down(action)`, `pressed(action)`, and `released(action)`. Actions: `up`, `down`, `left`, `right`, `a`, `b`, `x`, `y`, `start`, `select`.
+The shared input object exposes `down(action)`, `pressed(action)`, and `released(action)`. Actions: `up`, `down`, `left`, `right`, `a`, `b`, `x`, `y`, `start`, `select`, `guide`, `l1`, `r1`, `l2`, `r2`, `l3`, `r3`, `rs_up`, `rs_down`, `rs_left`, `rs_right`.
 
-Keyboard defaults: arrows/WASD for directions, Z/Space for A, X/Left Ctrl for B, Q for X, E for Y, Enter for Start, and Backspace for Select. Controller mappings are provisional until tested on the target hardware.
+Keyboard defaults: arrows/WASD for directions, Z/Space for A, X/Left Ctrl for B, Q for X, E for Y, Enter for Start, and Backspace for Select. Extended keyboard test bindings: `1/2` = L1/R1, `3/4` = L2/R2, `5/6` = L3/R3, `I/J/K/L` = right stick. Standard SDL button/axis indices are provisional until tested on the target hardware. Launch `run_windows.bat games/input_lab/main.py` (or the equivalent Linux launcher) to inspect raw button indices 0-15, axes 0-5, hat values, recent events, and mapped states.
+
+## Input diagnostic game
+
+Run `games/input_lab/main.py` to display 2x2 dithered color ramps and a live input panel. It logs raw SDL button, axis, and hat events as well as mapped logical actions, making unknown controller layouts diagnosable without assuming R36S-specific indices.
 
 ## Compatibility plan
 
