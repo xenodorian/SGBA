@@ -105,6 +105,38 @@ class RuntimeTests(unittest.TestCase):
         ))
         self.assertFalse(inputs.down("right"))
 
+    def test_extended_gamepad_button_and_trigger_actions(self):
+        inputs = runtime.InputState()
+        inputs.begin_frame()
+        for button, action in ((9, "l1"), (10, "r1"), (7, "l3"), (8, "r3"), (5, "guide")):
+            inputs.process(pygame.event.Event(pygame.JOYBUTTONDOWN, instance_id=4, button=button))
+            self.assertTrue(inputs.down(action), action)
+        inputs.process(pygame.event.Event(pygame.JOYAXISMOTION, instance_id=4, axis=4, value=0.9))
+        inputs.process(pygame.event.Event(pygame.JOYAXISMOTION, instance_id=4, axis=5, value=0.9))
+        self.assertTrue(inputs.down("l2"))
+        self.assertTrue(inputs.down("r2"))
+        inputs.process(pygame.event.Event(pygame.JOYAXISMOTION, instance_id=4, axis=4, value=-1.0))
+        self.assertFalse(inputs.down("l2"))
+
+    def test_right_stick_axes_map_to_separate_actions(self):
+        inputs = runtime.InputState()
+        inputs.begin_frame()
+        inputs.process(pygame.event.Event(pygame.JOYAXISMOTION, instance_id=4, axis=2, value=-0.8))
+        inputs.process(pygame.event.Event(pygame.JOYAXISMOTION, instance_id=4, axis=3, value=0.8))
+        self.assertTrue(inputs.down("rs_left"))
+        self.assertTrue(inputs.down("rs_down"))
+
+    def test_extended_keyboard_bindings(self):
+        inputs = runtime.InputState()
+        inputs.begin_frame()
+        bindings = ((pygame.K_1, "l1"), (pygame.K_2, "r1"), (pygame.K_3, "l2"),
+                    (pygame.K_4, "r2"), (pygame.K_5, "l3"), (pygame.K_6, "r3"),
+                    (pygame.K_i, "rs_up"), (pygame.K_k, "rs_down"),
+                    (pygame.K_j, "rs_left"), (pygame.K_l, "rs_right"))
+        for key, action in bindings:
+            inputs.process(pygame.event.Event(pygame.KEYDOWN, key=key))
+            self.assertTrue(inputs.down(action), action)
+
     def test_unknown_action_is_rejected(self):
         with self.assertRaises(ValueError):
             runtime.InputState().down("jump")
