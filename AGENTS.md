@@ -8,4 +8,7 @@ Before any work:
 5. Make small, scoped changes. Verify before claiming completion. Never infer target-device compatibility from desktop CI.
 6. Do not install anything on the R36S or modify firmware/system files. Device work is blocked until target details are known and the user explicitly approves a reversible test.
 
+## Mandatory game-delivery rule
+When asked to create or modify a game, the AI agent owns the complete workflow. Do not tell the user to open a terminal, type commands, install dependencies manually, run a packaging script, or assemble the deliverable. Make the source changes, run the available checks and packaging tool in the agent environment, and create a valid `.sgba` package as part of the task. Include the `.sgba` file in the repository when the task is repository-based, or provide the actual generated artifact through the available file-delivery mechanism when supported. Do not claim a package exists unless it was created and validated. If tools or permissions prevent creating/testing it, state the exact blocker and do not delegate command-line work to the user.
+
 Current project objective: a simple Python/Pygame runtime with a 640x480 logical canvas, allowing AI-generated games to share code between Windows development and a future R36S deployment. Preserve the existing framework and avoid unnecessary architecture.
