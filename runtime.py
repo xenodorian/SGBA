@@ -1,4 +1,4 @@
-"""Small, resource-conscious Pygame runtime for SGBA / R36S."""
+"""Small, resource-conscious Pygame runtime for SGBA. Device-agnostic: any SDL2 display and keyboard/gamepad."""
 from __future__ import annotations
 
 import argparse

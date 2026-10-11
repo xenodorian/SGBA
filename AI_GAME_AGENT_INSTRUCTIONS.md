@@ -1,6 +1,6 @@
 # AI Game Agent Instructions
 
-Implement compact 2D games for the SGBA Python/Pygame runtime. Prioritize stable 60 Hz gameplay, low memory use, and low integration cost on Windows and the future R36S target.
+Implement compact 2D games for the SGBA Python/Pygame runtime. Prioritize stable 60 Hz gameplay, low memory use, and low integration cost on any supported device. Do not write device-specific code.
 
 ## Before editing
 - Read AGENTS.md, Current_Work.md, GAME_DEVELOPMENT.md, runtime.py, and the target game's actual files.

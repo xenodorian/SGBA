@@ -13,7 +13,7 @@ Latest verified runtime/package code: 86ac857780da89a177479574a200e79c4961209a
 5. Do not install anything on the R36S, alter firmware/system files, or change global Python. Device work requires verified target details and explicit approval.
 
 ## Objective
-Build a small, predictable Python/Pygame virtual console for AI-generated 2D games shared between Windows and a future R36S handheld with 1 GiB RAM. Prioritize stable 60 Hz simulation, low memory use, and a constrained API coding agents can follow.
+Build a small, predictable, device-agnostic Python/Pygame virtual console for AI-generated 2D games shared between Windows and a future R36S handheld with 1 GiB RAM. Prioritize stable 60 Hz simulation, low memory use, and a constrained API coding agents can follow.
 
 ## Implemented
 - `.sgba` version 1 package format: ZIP-compatible archive with root `manifest.json`, fixed-format metadata, Python entry point, optional game config/assets/modules, strict path/format/integrity validation, and bounded archive/file sizes. Runtime accepts `.sgba` paths directly and extracts validated packages to a temporary cache.
@@ -46,7 +46,7 @@ Status: IMPLEMENTED ON MAIN, DESKTOP CI PASSED
 Validate archive structure, package version, entry point, paths, integrity, and resource limits. Verify packaging tool and direct runtime loading in Windows/Linux CI. This is format validation, not a Python sandbox. PR #1 merged after all four desktop CI jobs passed.
 
 ### P0: Safe target deployment
-Status: IN PROGRESS (device facts partly known, see Device facts)
+Status: DEFERRED (owner has no further device information; no device-specific work)
 Do not run desktop setup on the R36S or modify firmware, system Python, system libraries, boot configuration, or frontend. Determine firmware, architecture/ABI, libc, Python, SDL, display, and controller details before proposing deployment. Require a reversible plan.
 
 ### P1: Fixed-step runtime and input edges
@@ -62,7 +62,7 @@ Status: IMPLEMENTED, DESKTOP CI PASSED
 AssetStore limits cover only assets loaded through the API; asset-folder auditing is a coarse guardrail, not a process-memory profiler.
 
 ### P4: R36S hardware validation
-Status: BLOCKED ON PYTHON/PYGAME AVAILABILITY AND OWNER-APPROVED PROBE
+Status: DEFERRED, OPTIONAL (owner-run only if desired; runtime must not depend on it)
 Confirm firmware, CPU architecture, userspace/libc, Python, SDL, and controller mapping. Test launch/exit, scaling, input, frame pacing, asset loading, and performance on actual hardware. Record measurements.
 
 ### P5: Browser preview
@@ -78,7 +78,7 @@ Source: owner's launch.log, GitROMs run, CryMon handoff notes, relayed second-ha
 Confirmed: ArkOS with PortMaster (/opt/system/Tools/PortMaster, ports in /roms/ports); kernel Linux 4.4.189 (Oct 13 2021), hostname rg351mp; aarch64; glibc (loader cache lists AArch64 and 32-bit hard-float; version unknown, 2.17+ ran an aarch64 binary); libSDL2-2.0.so.0 present for both ABIs (version unknown); app renders 640x480.
 Unconfirmed (general knowledge/notes): RK3326 SoC; gptokeyb maps pad to keyboard keys (A=z, B=x observed in GitROMs). runtime.py KEY_MAP already maps z->a and x->b, so keyboard-mapped input should work without code changes.
 Unknown: Python and pygame availability and versions, exact glibc/SDL versions, SDL video driver (gitroms.log in the GitROMs data folder records it), real RAM/free disk.
-Next: tools/device_probe.sh is a read-only POSIX shell probe for these unknowns. It installs and writes nothing. Do not run it on the device without explicit owner approval.
+Direction (owner, 2026-10-11): no more device information is available. The runtime must work across many devices; never build device-specific code. Design to SDL2/pygame generics: any display size via aspect-preserving scaling, keyboard plus gamepad (buttons, hats, axes), no assumed hardware.
 
 ## Known limits
 - Fixed-step simulation and 60 Hz render pacing do not guarantee 60 FPS on hardware that cannot keep up.
@@ -87,7 +87,7 @@ Next: tools/device_probe.sh is a read-only POSIX shell probe for these unknowns.
 - No R36S deployment or performance test has occurred.
 
 ## Change log
-- 2026-10-11: Recorded relayed R36S device facts, added read-only tools/device_probe.sh (not run on device), refreshed CI status for P1/P2/P5 from GitHub Actions on ae8b8d3, removed duplicate bullet.
+- 2026-10-11: Recorded relayed R36S device facts, stated the device-agnostic direction (device probe tool removed), refreshed CI status for P1/P2/P5 from GitHub Actions on ae8b8d3, removed duplicate bullet.
 - 2026-10-11: Added `.sgba` version 1 ZIP-compatible game packages, manifest validation, archive/path/size guards, runtime extraction/loading, packaging CLI, regression tests, and documentation. Desktop CI passed after merge; no R36S testing.
 - 2026-10-11: Made AI-owned packaging mandatory: game agents must generate and validate `.sgba` files and include them in deliverables; never ask the user to run terminal commands.
 - 2026-10-11: Added fixed-step simulation, low-resolution profiles, cached/budgeted assets, SpriteSheet, Animation, TileMap, draw_sprite, SceneManager, SaveStore, low-memory AI contract, template manifest, asset audit, benchmark probe, and regression tests. Desktop CI passed on eb18298846c86046910b63619a3a405c12dd1cc6; no R36S testing.

@@ -1,12 +1,12 @@
 # SGBA
 
-A small, resource-conscious Python/Pygame runtime for 2D games. The goal is to use the same game code on a Windows development PC and the future R36S handheld.
+A small, resource-conscious Python/Pygame runtime for 2D games. The goal is one device-agnostic runtime: the same game code runs on any device with Python, pygame/SDL2, a display, and a keyboard or gamepad (Windows, Linux, handhelds such as the R36S).
 
 ## Current status
 
 The native runtime uses a fixed 60 Hz simulation loop, a default 640×480 logical canvas, optional 240×160 and 320×240 low-resolution profiles, source-aware logical input, nearest-neighbor scaling, and cached asset loading with decoded-image limits.
 
-The R36S has 1 GiB RAM shared with the operating system and running software. Memory and frame time are design constraints. The runtime cannot guarantee 60 FPS on untested hardware or against an unbounded game; generated games must follow the resource contract in GAME_DEVELOPMENT.md.
+Low-end handhelds such as the R36S have about 1 GiB RAM shared with the operating system and running software. Memory and frame time are design constraints. The runtime cannot guarantee 60 FPS on untested hardware or against an unbounded game; generated games must follow the resource contract in GAME_DEVELOPMENT.md.
 
 **Do not run the desktop Linux setup script on the R36S.** Firmware, CPU architecture, system libraries, Python, SDL support, and controller layout must be confirmed first. Do not modify the system installation or firmware.
 
