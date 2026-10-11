@@ -87,3 +87,14 @@ Run `python tools/benchmark_game.py games/my_game/main.py --frames 300` to measu
 - Keep controller details out of game logic.
 - The browser preview is secondary and does not define the native architecture.
 - Do not claim R36S compatibility or performance before actual device testing.
+
+
+## JavaScript (browser) games
+
+SGBA also runs browser games written in JavaScript: a folder with `index.html`, scripts and assets, drawing to one 2D `<canvas>`. Develop and test them on the web as usual; the same folder runs in SGBA on PC and handhelds. Supported: canvas 2D, images, timers, `requestAnimationFrame`, keyboard, the Gamepad API (fed from SGBA's standard buttons), `localStorage`, `fetch` of local files. Not supported: WebGL, modules (`type="module"`), networking, real Web Audio.
+
+**Buttons and menus.** HTML you place over the canvas (menus, loading bars, dialogs) is drawn by SGBA as one centred panel, and every `<button>` (and `a[href]`, `input`, `[tabindex]`) is a focusable row. No pointer is used. Two modes, chosen in an optional `sgba_ui.json` next to `index.html`:
+- `"navigation": "engine"` (default): D-pad Up/Down moves focus, A presses the focused button, B goes back (sends Escape, else presses a Back/Close/Cancel button). While a panel is open the pad is hidden from the game so A does not also attack.
+- `"navigation": "game"`: the game already moves focus itself from the Gamepad API (as Parry Perry does); SGBA only draws the panel and its focus highlight.
+- `"hotkeys": {"select": "btn-hud-start"}` presses the on-screen button with that id when a pad action fires and no panel is open (for a lone HUD button such as "Menu").
+Layout is simple on purpose: headings, text, tables, buttons stacked vertically, icons from small canvases, progress bars (`.bar > .fill` with a percentage width). Keep menu markup plain and it will lay out correctly; CSS beyond `display:none` is ignored.

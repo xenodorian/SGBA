@@ -24,6 +24,7 @@ def main() -> int:
     parser.add_argument("--shot", type=Path)
     parser.add_argument("--press", action="append", default=[], help="frame:action, e.g. 30:start")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--nav", choices=["engine", "game", "off"], help="override sgba_ui.json navigation")
     args = parser.parse_args()
     pygame.init()
     pygame.display.set_mode((640, 480))
@@ -37,6 +38,8 @@ def main() -> int:
     t0 = time.time()
     game = sgba_js.JSGame(args.root, save_dir=Path("/tmp/js_spike_saves"), log=log)
     print(f"loaded in {time.time() - t0:.2f}s, logical size {game.logical_size}, errors so far {game.host.errors}")
+    if args.nav:
+        game.config["navigation"] = args.nav
     inputs = runtime.InputState()
     schedule = {}
     for item in args.press:

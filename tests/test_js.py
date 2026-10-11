@@ -111,5 +111,118 @@ class JSHostTests(unittest.TestCase):
         self.assertEqual(game.host.ctx.eval("window.v"), 7)
 
 
+PAGE = """<!doctype html><html><head><style>
+#menu[hidden]{display:none!important} .gone{display:none}
+</style></head><body><div id="stage"><canvas id="view" width="64" height="48"></canvas>
+<button id="hud">Menu</button>
+<div id="menu" hidden><h2 id="title">Pause</h2><p>Pick one &amp; go</p>
+<div id="list"><button id="b1" class="primary">One</button><button id="b2">Two</button><button id="b3" disabled>Three</button><button id="b4">Four</button></div>
+<div class="gone"><button id="ghost">Hidden</button></div></div></div>
+<script>
+window.log = [];
+for (const id of ['b1','b2','b4','hud']) document.getElementById(id).addEventListener('click', () => window.log.push(id));
+document.addEventListener('keydown', e => { if (e.key === 'Escape') window.log.push('esc'); });
+window.openMenu = () => { document.getElementById('menu').hidden = false; };
+</script></body></html>"""
+
+
+@unittest.skipUnless(HAVE_JS, "quickjs-ng is not installed")
+class JSDomAndUiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        pygame.init()
+        pygame.display.set_mode((1, 1))
+
+    @classmethod
+    def tearDownClass(cls):
+        pygame.quit()
+
+    def make(self, config=None, html=PAGE):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "index.html").write_text(html, encoding="utf-8")
+        if config:
+            (root / "sgba_ui.json").write_text(__import__("json").dumps(config), encoding="utf-8")
+        game = sgba_js.JSGame(root, save_dir=root / "save", log=lambda *a: None)
+        self.inputs = runtime.InputState()
+        return game
+
+    def step(self, game, action=None, frames=2):
+        if action:
+            self.inputs._set(action, ("t",), True)
+        for i in range(frames):
+            game.update(1 / 60, self.inputs)
+            if i == 0 and action:
+                self.inputs._set(action, ("t",), False)
+            self.inputs.consume_edges()
+
+    def ev(self, game, code):
+        return game.host.ctx.eval(code)
+
+    def test_selectors_innerhtml_and_hidden(self):
+        game = self.make()
+        self.assertEqual(self.ev(game, "document.querySelectorAll('#list button:not(:disabled)').length"), 3)
+        self.assertEqual(self.ev(game, "document.querySelectorAll('#list > button.primary, #hud').length"), 2)
+        self.assertEqual(self.ev(game, "document.querySelector('[disabled]').id"), "b3")
+        self.assertEqual(self.ev(game, "document.getElementById('b2').closest('#stage').id"), "stage")
+        self.ev(game, "document.getElementById('list').innerHTML = '<button data-x-y=\"7\">A &lt;b&gt;</button><i>t</i>'")
+        self.assertEqual(self.ev(game, "document.querySelector('#list button').dataset.xY"), "7")
+        self.assertEqual(self.ev(game, "document.getElementById('list').textContent"), "A <b>t")
+        self.assertEqual(self.ev(game, "document.getElementById('menu').hidden"), True)
+
+    def test_overlay_hidden_until_opened_then_drawn_and_navigable(self):
+        game = self.make()
+        self.step(game)
+        self.assertFalse(game.ui.modal)                 # menu is hidden; the lone HUD button is not a panel
+        self.ev(game, "openMenu()")
+        self.step(game)
+        self.assertTrue(game.ui.modal)
+        self.assertEqual(game.ui.focusable_count, 3)    # disabled and display:none buttons are skipped
+        out = pygame.Surface((640, 480))
+        out.fill((9, 9, 9))
+        game.draw(out)
+        self.assertNotEqual(tuple(out.get_at((320, 240)))[:3], (9, 9, 9))
+        self.step(game)
+        self.assertEqual(self.ev(game, "document.activeElement.id"), "b1")        # primary gets focus first
+        self.step(game, "down")
+        self.assertEqual(self.ev(game, "document.activeElement.id"), "b2")
+        self.step(game, "down")
+        self.assertEqual(self.ev(game, "document.activeElement.id"), "b4")        # b3 (disabled) is skipped
+        self.step(game, "down")
+        self.assertEqual(self.ev(game, "document.activeElement.id"), "b1")        # wraps
+        self.step(game, "up")
+        self.assertEqual(self.ev(game, "document.activeElement.id"), "b4")
+        self.step(game, "a")
+        self.assertEqual(self.ev(game, "window.log.join(',')"), "b4")
+        self.step(game, "b")
+        self.assertIn("esc", self.ev(game, "window.log.join(',')"))
+
+    def test_engine_mode_hides_pad_from_game_while_menu_open_and_hotkey_works(self):
+        game = self.make({"hotkeys": {"select": "hud"}})
+        self.inputs._set("a", ("t",), True)
+        self.step(game)
+        self.assertTrue(self.ev(game, "navigator.getGamepads()[0].buttons[0].pressed"))   # no menu: pad reaches the game
+        self.inputs._set("a", ("t",), False)
+        self.step(game, "select")
+        self.assertIn("hud", self.ev(game, "window.log.join(',')"))                        # hotkey pressed the HUD button
+        self.ev(game, "openMenu()")
+        self.step(game)
+        self.inputs._set("a", ("t",), True)
+        game.update(1 / 60, self.inputs)
+        self.assertFalse(self.ev(game, "navigator.getGamepads()[0].buttons[0].pressed"))  # menu open: pad belongs to the menu
+
+    def test_game_mode_leaves_navigation_to_the_game(self):
+        game = self.make({"navigation": "game"})
+        self.ev(game, "openMenu()")
+        self.step(game)
+        self.assertTrue(game.ui.modal)                   # still drawn
+        self.step(game, "down")
+        self.assertNotEqual(self.ev(game, "document.activeElement.id"), "b2")   # the engine did not move focus
+        self.inputs._set("a", ("t",), True)
+        game.update(1 / 60, self.inputs)
+        self.assertTrue(self.ev(game, "navigator.getGamepads()[0].buttons[0].pressed"))   # pad passes through
+
+
 if __name__ == "__main__":
     unittest.main()

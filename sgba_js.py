@@ -19,6 +19,8 @@ from urllib.parse import unquote, urlparse
 
 import pygame
 
+import sgba_js_ui
+
 try:
     import quickjs
 except ImportError:  # the bundle always includes it; plain dev installs may not
@@ -803,18 +805,10 @@ class JSHost:
         text = (self.root / index).read_text(encoding="utf-8")
         parser = _PageParser()
         parser.feed(text)
-        for item in parser.items:
-            if item[0] == "element":
-                _kind, tag, element_id, width, height = item
-                w = int(width) if width and width.isdigit() else 0
-                h = int(height) if height and height.isdigit() else 0
-                self.ctx.eval(f"__registerElement({json.dumps(element_id)}, {json.dumps(tag)}, {w}, {h})")
-        main = None
-        for item in parser.items:
-            if item[0] == "element" and item[1] == "canvas":
-                main = main or item[2]
-        if main is not None:
-            self.main_id = int(self.ctx.eval(f"document.getElementById({json.dumps(main)}).__id"))
+        self.ctx.get("__sgba_load_html")(text)
+        self.pump()
+        main = self.ctx.eval("(() => { const c = document.querySelector('canvas'); return c ? c.__id : -1; })()")
+        self.main_id = int(main) if int(main) >= 0 else None
         for item in parser.items:
             if item[0] != "script":
                 continue
@@ -895,16 +889,41 @@ def js_key(key: int):
 # ---------------------------------------------------------------- SGBA game adapter
 
 class JSGame:
-    """SGBA game object that hosts a browser-style JavaScript game."""
+    """SGBA game object that hosts a browser-style JavaScript game.
+
+    HTML the game shows over its canvas (menus, loading bars) is drawn by the engine, and every button in it is
+    reachable with the pad. Optional sgba_ui.json in the game folder tunes this:
+      {"navigation": "engine" | "game" | "off",   "engine" (default): D-pad moves focus, A presses, B goes back;
+                                                  "game": the game already reads the pad and moves focus itself
+       "hotkeys": {"select": "btn-hud-start"}}    pad action -> id of an on-screen button to press when no menu is open
+    """
+
+    REPEAT_DELAY = 0.40
+    REPEAT_RATE = 0.12
 
     def __init__(self, root: Path, index: str = "index.html", save_dir: Path | None = None, log=None) -> None:
         root = Path(root)
         save_path = (save_dir or root) / "localStorage.json" if save_dir is not None else None
         self.host = JSHost(root, save_path=save_path, log=log)
+        self.config = self._load_config(root)
         self.host.load_page(index)
         if self.host.main_surface is None:
             raise RuntimeError("index.html has no <canvas> element")
-        self._held_actions: set = set()
+        self.ui = sgba_js_ui.DomOverlay(self.host)
+        self._held: dict = {}
+
+    @staticmethod
+    def _load_config(root: Path) -> dict:
+        config = {"navigation": "engine", "hotkeys": {}}
+        path = root / "sgba_ui.json"
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    config.update({k: v for k, v in data.items() if k in config})
+            except (OSError, ValueError):
+                pass
+        return config
 
     @property
     def logical_size(self):
@@ -916,18 +935,58 @@ class JSGame:
         elif event.type == pygame.KEYUP:
             self.host.key_event("keyup", event.key)
 
-    def _pad_json(self, inputs) -> str:
-        buttons = [{"pressed": bool(inputs.down(a)), "touched": bool(inputs.down(a)), "value": 1 if inputs.down(a) else 0} for a in STANDARD_BUTTONS]
-        axes = [(-1.0 if inputs.down("rs_left") else 1.0 if inputs.down("rs_right") else 0.0),
-                (-1.0 if inputs.down("rs_up") else 1.0 if inputs.down("rs_down") else 0.0)]
-        axes = [0.0, 0.0] + axes
+    def _pad_json(self, inputs, neutral: bool) -> str:
+        def down(action):
+            return False if neutral else bool(inputs.down(action))
+        buttons = [{"pressed": down(a), "touched": down(a), "value": 1 if down(a) else 0} for a in STANDARD_BUTTONS]
+        axes = [0.0, 0.0,
+                (-1.0 if down("rs_left") else 1.0 if down("rs_right") else 0.0),
+                (-1.0 if down("rs_up") else 1.0 if down("rs_down") else 0.0)]
         pad = {"id": "SGBA standard gamepad", "index": 0, "connected": True, "mapping": "standard", "timestamp": 0,
                "buttons": buttons, "axes": axes}
         return json.dumps([pad])
 
+    def _repeat(self, inputs, action: str, dt: float) -> bool:
+        """True on the press and then at a steady rate while the action stays held."""
+        if inputs.pressed(action):
+            self._held[action] = -self.REPEAT_DELAY
+            return True
+        if inputs.down(action):
+            t = self._held.get(action)
+            if t is None:
+                return False
+            t += dt
+            if t >= self.REPEAT_RATE - 1e-9:
+                self._held[action] = t - self.REPEAT_RATE
+                return True
+            self._held[action] = t
+            return False
+        self._held.pop(action, None)
+        return False
+
     def update(self, dt: float, inputs) -> None:
-        self.host.set_pads(self._pad_json(inputs))
+        mode = self.config["navigation"]
+        engine = mode == "engine"
+        self.host.set_pads(self._pad_json(inputs, neutral=engine and self.ui.modal))
         self.host.tick(dt)
+        self.ui.refresh()
+        if not engine:
+            return
+        if self.ui.modal:
+            self.ui.ensure_focus()
+            if self._repeat(inputs, "up", dt):
+                self.ui.move(-1)
+            elif self._repeat(inputs, "down", dt):
+                self.ui.move(1)
+            elif inputs.pressed("a"):
+                self.ui.activate()
+            elif inputs.pressed("b"):
+                self.ui.back()
+            self.ui.refresh()
+        else:
+            for action, element_id in self.config["hotkeys"].items():
+                if inputs.pressed(action):
+                    self.ui.hotkey(element_id)
 
     def draw(self, surface: pygame.Surface) -> None:
         main = self.host.main_surface
@@ -935,6 +994,7 @@ class JSGame:
             surface.blit(main, (0, 0))
         else:
             surface.blit(pygame.transform.scale(main, surface.get_size()), (0, 0))
+        self.ui.draw(surface)
 
 
 def create_game_for(entry_file: str, index: str = "index.html", save_dir: str | None = None) -> JSGame:

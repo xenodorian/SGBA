@@ -57,7 +57,7 @@ TARGETS = {
     },
 }
 
-RUNTIME_FILES = ("runtime.py", "sgba_package.py", "sgba_shell.py", "sgba_js.py", "sgba_js_shim.js")
+RUNTIME_FILES = ("runtime.py", "sgba_package.py", "sgba_shell.py", "sgba_js.py", "sgba_js_ui.py", "sgba_js_shim.js")
 PACKAGED_GAMES = ("demo", "input_lab")   # games/template is a starter, not a game
 PYTHON_TRIM = ("test", "idlelib", "tkinter", "turtledemo", "ensurepip", "lib2to3", "pydoc_data",
                "distutils", "unittest/test")
