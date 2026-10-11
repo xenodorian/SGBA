@@ -55,7 +55,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "$RUNNER_TEMP/sgba-web-preview/build/web"
+          path: "${{ runner.temp }}/sgba-web-preview/build/web"
 
       - name: Deploy to GitHub Pages
         id: deployment
