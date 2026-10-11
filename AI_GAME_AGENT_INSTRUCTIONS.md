@@ -34,6 +34,7 @@ The target has 1 GiB RAM shared with the OS and runtime. Treat memory as scarce.
 - Default decoded-image budget is 16 MiB and max image dimension 512. For 240×160 games, prefer 8 MiB and 256×256.
 - Use PNG for pixel art. Avoid video, oversized audio/fonts, duplicate assets, huge backgrounds, and unnecessary packages.
 - Use runtime.AssetStore for cached images, fonts, and sounds. It confines paths to its asset folder and limits decoded image memory and image dimensions.
+- Use runtime.SpriteSheet and runtime.draw_sprite for simple sprite-sheet frames, camera offsets, and clipping. Use runtime.SceneManager for small named scenes and runtime.SaveStore for compact JSON saves at an explicitly writable path. Do not build competing abstractions without a concrete need.
 - Never load or transform assets, render static text, or allocate large temporary surfaces every frame.
 - Cap entities, particles, projectiles, and other transient objects. Prefer grid-based collision and simple spatial checks over heavyweight physics.
 - No networking, subprocesses, native extensions, or unnecessary threads.
