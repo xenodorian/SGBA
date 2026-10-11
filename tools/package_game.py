@@ -60,7 +60,7 @@ def package_game(game_dir: Path, output_path: Path, title: str | None = None) ->
         raise ValueError("Game exceeds 64 MiB unpacked package limit")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
+    temporary = output_path.with_name(output_path.stem + ".tmp.sgba")
     try:
         with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
             archive.writestr("manifest.json", json.dumps(manifest, indent=2) + "\n")
@@ -68,7 +68,7 @@ def package_game(game_dir: Path, output_path: Path, title: str | None = None) ->
                 archive.write(path, relative)
         if temporary.stat().st_size > MAX_ARCHIVE_BYTES:
             raise ValueError("Package exceeds 32 MiB compressed-size limit")
-        validate_package(temporary.with_suffix(".sgba") if False else temporary)
+        validate_package(temporary)
         os.replace(temporary, output_path)
         validate_package(output_path)
     except Exception:
