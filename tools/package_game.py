@@ -43,6 +43,8 @@ def package_game(game_dir: Path, output_path: Path, title: str | None = None) ->
 
     files = []
     for path in sorted(game_dir.rglob("*")):
+        if path.is_symlink():
+            raise ValueError(f"Symbolic links are not allowed in game packages: {path.relative_to(game_dir)}")
         if not path.is_file():
             continue
         relative = path.relative_to(game_dir)
