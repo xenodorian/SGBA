@@ -18,7 +18,9 @@ Each game is a Python file that defines `create_game()` and returns an object wi
 - `update(dt, inputs)`: optional; update game state. Use `dt` for time-based movement.
 - `handle_event(event)`: optional; receive Pygame events when needed.
 
-Input actions are `up`, `down`, `left`, `right`, `a`, `b`, `x`, `y`, `start`, and `select`. Use `inputs.down(action)` for held input, `inputs.pressed(action)` for a new press, and `inputs.released(action)` for release.
+Input actions are `up`, `down`, `left`, `right`, `a`, `b`, `x`, `y`, `start`, `select`, `guide`, `l1`, `r1`, `l2`, `r2`, `l3`, `r3`, `rs_up`, `rs_down`, `rs_left`, and `rs_right`. Use `inputs.down(action)` for held input, `inputs.pressed(action)` for a new press, and `inputs.released(action)` for release.
+
+The `games/input_lab/main.py` diagnostic displays high-contrast dithered gradients and shows both mapped logical actions and raw SDL button/axis/hat events. The raw event panel is useful when a target controller uses a different physical-to-SDL mapping.
 
 ## Portability rules
 
