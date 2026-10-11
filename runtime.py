@@ -22,62 +22,107 @@ KEY_MAP = {
     pygame.K_RETURN: "start", pygame.K_BACKSPACE: "select",
 }
 
-# Common SDL gamepad button order: A, B, X, Y, Back, Guide, Start.
+# Common SDL joystick button order. Device-specific mapping may be needed
+# after checking the actual R36S firmware and controller event layout.
 BUTTON_MAP = {
     0: "a", 1: "b", 2: "x", 3: "y", 4: "select", 6: "start",
 }
 
 
 class InputState:
-    """Frame-based keyboard and controller input shared by every game."""
+    """Frame-based input that combines keyboard, buttons, hats, and stick axes."""
 
     def __init__(self) -> None:
-        self._held: set[str] = set()
+        # Each action tracks its individual physical input sources. An action
+        # remains held until every source contributing to it has been released.
+        self._sources: dict[str, set[tuple]] = {action: set() for action in ACTIONS}
         self._pressed: set[str] = set()
         self._released: set[str] = set()
-        self._joysticks: dict[int, pygame.joystick.JoystickType] = {}
+        self._joysticks: dict[int, object] = {}
 
     def begin_frame(self) -> None:
         self._pressed.clear()
         self._released.clear()
 
-    def _set(self, action: str, is_down: bool) -> None:
-        if is_down and action not in self._held:
-            self._held.add(action)
+    def _set(self, action: str, source: tuple, is_down: bool) -> None:
+        sources = self._sources[action]
+        was_down = bool(sources)
+        if is_down:
+            sources.add(source)
+        else:
+            sources.discard(source)
+        is_down_now = bool(sources)
+        if is_down_now and not was_down:
             self._pressed.add(action)
-        elif not is_down and action in self._held:
-            self._held.remove(action)
+        elif was_down and not is_down_now:
             self._released.add(action)
+
+    @staticmethod
+    def _instance_id(event: pygame.event.Event) -> int:
+        # Pygame 2 supplies instance_id; joy is retained as a fallback.
+        return int(getattr(event, "instance_id", getattr(event, "joy", -1)))
+
+    def _remove_joystick_sources(self, instance_id: int) -> None:
+        for action, sources in self._sources.items():
+            for source in tuple(sources):
+                if len(source) > 1 and source[0] in ("joybutton", "joyhat", "joyaxis") and source[1] == instance_id:
+                    self._set(action, source, False)
 
     def process(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN and event.key in KEY_MAP:
-            self._set(KEY_MAP[event.key], True)
+            action = KEY_MAP[event.key]
+            self._set(action, ("key", event.key), True)
         elif event.type == pygame.KEYUP and event.key in KEY_MAP:
-            self._set(KEY_MAP[event.key], False)
+            action = KEY_MAP[event.key]
+            self._set(action, ("key", event.key), False)
         elif event.type == pygame.JOYDEVICEADDED:
             joystick = pygame.joystick.Joystick(event.device_index)
             joystick.init()
             self._joysticks[joystick.get_instance_id()] = joystick
         elif event.type == pygame.JOYDEVICEREMOVED:
-            self._joysticks.pop(event.instance_id, None)
-        elif event.type == pygame.JOYBUTTONDOWN and event.button in BUTTON_MAP:
-            self._set(BUTTON_MAP[event.button], True)
-        elif event.type == pygame.JOYBUTTONUP and event.button in BUTTON_MAP:
-            self._set(BUTTON_MAP[event.button], False)
+            instance_id = self._instance_id(event)
+            self._remove_joystick_sources(instance_id)
+            self._joysticks.pop(instance_id, None)
+        elif event.type in (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP):
+            action = BUTTON_MAP.get(event.button)
+            if action is not None:
+                source = ("joybutton", self._instance_id(event), event.button)
+                self._set(action, source, event.type == pygame.JOYBUTTONDOWN)
         elif event.type == pygame.JOYHATMOTION:
+            instance_id = self._instance_id(event)
+            hat = getattr(event, "hat", 0)
             x, y = event.value
             for action, down in (("left", x < 0), ("right", x > 0),
                                  ("up", y > 0), ("down", y < 0)):
-                self._set(action, down)
+                source = ("joyhat", instance_id, hat, action)
+                self._set(action, source, down)
+        elif event.type == pygame.JOYAXISMOTION and event.axis in (0, 1):
+            instance_id = self._instance_id(event)
+            value = event.value
+            if event.axis == 0:
+                states = (("left", value < -0.5), ("right", value > 0.5))
+            else:
+                states = (("up", value < -0.5), ("down", value > 0.5))
+            for action, down in states:
+                source = ("joyaxis", instance_id, event.axis, action)
+                self._set(action, source, down)
 
     def down(self, action: str) -> bool:
-        return action in self._held
+        self._validate_action(action)
+        return bool(self._sources[action])
 
     def pressed(self, action: str) -> bool:
+        self._validate_action(action)
         return action in self._pressed
 
     def released(self, action: str) -> bool:
+        self._validate_action(action)
         return action in self._released
+
+    @staticmethod
+    def _validate_action(action: str) -> None:
+        if action not in ACTIONS:
+            raise ValueError(f"Unknown input action: {action}")
 
 
 def load_game(path: Path):
@@ -110,13 +155,19 @@ def main() -> int:
 
     pygame.init()
     try:
+        # Initialize already-connected controllers as well as handling hotplug.
+        inputs = InputState()
+        for device_index in range(pygame.joystick.get_count()):
+            joystick = pygame.joystick.Joystick(device_index)
+            joystick.init()
+            inputs._joysticks[joystick.get_instance_id()] = joystick
+
         flags = pygame.FULLSCREEN if args.fullscreen else 0
         window_size = (960, 720) if not args.fullscreen else (0, 0)
         display = pygame.display.set_mode(window_size, flags)
         pygame.display.set_caption("R36S PyGame Runtime")
         logical = pygame.Surface(LOGICAL_SIZE)
         clock = pygame.time.Clock()
-        inputs = InputState()
         running = True
         game = load_game(game_path)
 

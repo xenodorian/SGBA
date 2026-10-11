@@ -38,6 +38,77 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(inputs.down("left"))
         self.assertTrue(inputs.released("left"))
 
+    def test_keyboard_and_controller_sources_do_not_cancel_each_other(self):
+        inputs = runtime.InputState()
+        inputs.begin_frame()
+        inputs.process(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_z))
+        inputs.process(pygame.event.Event(
+            pygame.JOYBUTTONDOWN, instance_id=7, button=0
+        ))
+        self.assertTrue(inputs.down("a"))
+
+        inputs.begin_frame()
+        inputs.process(pygame.event.Event(pygame.KEYUP, key=pygame.K_z))
+        self.assertTrue(inputs.down("a"))
+        self.assertFalse(inputs.released("a"))
+
+        inputs.process(pygame.event.Event(
+            pygame.JOYBUTTONUP, instance_id=7, button=0
+        ))
+        self.assertFalse(inputs.down("a"))
+        self.assertTrue(inputs.released("a"))
+
+    def test_keyboard_and_hat_direction_combine(self):
+        inputs = runtime.InputState()
+        inputs.begin_frame()
+        inputs.process(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_LEFT))
+        inputs.process(pygame.event.Event(
+            pygame.JOYHATMOTION, instance_id=7, hat=0, value=(-1, 0)
+        ))
+        inputs.begin_frame()
+        inputs.process(pygame.event.Event(pygame.KEYUP, key=pygame.K_LEFT))
+        self.assertTrue(inputs.down("left"))
+        self.assertFalse(inputs.released("left"))
+        inputs.process(pygame.event.Event(
+            pygame.JOYHATMOTION, instance_id=7, hat=0, value=(0, 0)
+        ))
+        self.assertFalse(inputs.down("left"))
+        self.assertTrue(inputs.released("left"))
+
+    def test_controller_removal_clears_held_input(self):
+        inputs = runtime.InputState()
+        inputs.begin_frame()
+        inputs.process(pygame.event.Event(
+            pygame.JOYHATMOTION, instance_id=9, hat=0, value=(1, 0)
+        ))
+        self.assertTrue(inputs.down("right"))
+        inputs.begin_frame()
+        inputs.process(pygame.event.Event(
+            pygame.JOYDEVICEREMOVED, instance_id=9
+        ))
+        self.assertFalse(inputs.down("right"))
+        self.assertTrue(inputs.released("right"))
+
+    def test_analog_stick_has_deadzone_and_directional_input(self):
+        inputs = runtime.InputState()
+        inputs.begin_frame()
+        inputs.process(pygame.event.Event(
+            pygame.JOYAXISMOTION, instance_id=3, axis=0, value=0.2
+        ))
+        self.assertFalse(inputs.down("right"))
+        inputs.process(pygame.event.Event(
+            pygame.JOYAXISMOTION, instance_id=3, axis=0, value=0.8
+        ))
+        self.assertTrue(inputs.down("right"))
+        inputs.process(pygame.event.Event(
+            pygame.JOYAXISMOTION, instance_id=3, axis=0, value=0.0
+        ))
+        self.assertFalse(inputs.down("right"))
+
+    def test_unknown_action_is_rejected(self):
+        with self.assertRaises(ValueError):
+            runtime.InputState().down("jump")
+
     def test_demo_game_loads_and_draws(self):
         game = runtime.load_game(ROOT / "games" / "demo" / "main.py")
         surface = pygame.Surface(runtime.LOGICAL_SIZE)
