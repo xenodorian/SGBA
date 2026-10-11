@@ -47,7 +47,7 @@ def main() -> int:
             samples.append((time.perf_counter() - start) * 1000)
         ordered = sorted(samples)
         p95 = ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))]
-        average = statistics.fmean(samples)
+        average = sum(samples) / len(samples)
         print(f"Game: {game_path}")
         print(f"Profile: {config['logical_size'][0]}x{config['logical_size'][1]}")
         print(f"Samples: {len(samples)}")
