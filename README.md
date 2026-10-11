@@ -8,6 +8,13 @@ The native runtime uses a fixed 60 Hz simulation loop, a default 640×480 logica
 
 Low-end handhelds such as the R36S have about 1 GiB RAM shared with the operating system and running software. Memory and frame time are design constraints. The runtime cannot guarantee 60 FPS on untested hardware or against an unbounded game; generated games must follow the resource contract in GAME_DEVELOPMENT.md.
 
+## Supported targets
+- Windows PC and ArkOS 2.x handhelds (R36S class), plus other desktop Linux.
+- Minimum software: Python 3.8, pygame 2.0 with SDL2. Newer versions are also tested (3.11, 3.12, pygame 2.6.1).
+- ArkOS: copy this folder to the device and run `./run_arkos.sh <game or .sgba>`. It uses the system `python3` and pygame, installs nothing, and writes `sgba_launch.log` in the folder. If pygame is missing the log says so.
+- Input works from keyboard events (what `gptokeyb` sends) or directly from a gamepad. Start+Select quits on devices without an Esc key.
+- Compatibility is verified on desktop with Python 3.8/pygame 2.0.1 in CI. It has not been run on ArkOS hardware.
+
 **Do not run the desktop Linux setup script on the R36S.** Firmware, CPU architecture, system libraries, Python, SDL support, and controller layout must be confirmed first. Do not modify the system installation or firmware.
 
 ## Agent handoff

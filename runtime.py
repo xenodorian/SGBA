@@ -384,6 +384,11 @@ class InputState:
             self._released.add(action)
 
     @staticmethod
+    def _joystick_id(joystick: pygame.joystick.Joystick) -> int:
+        getter = getattr(joystick, "get_instance_id", None) or joystick.get_id
+        return int(getter())
+
+    @staticmethod
     def _instance_id(event: pygame.event.Event) -> int:
         return int(getattr(event, "instance_id", getattr(event, "joy", -1)))
 
@@ -398,11 +403,11 @@ class InputState:
             self._set(KEY_MAP[event.key], ("key", event.key), True)
         elif event.type == pygame.KEYUP and event.key in KEY_MAP:
             self._set(KEY_MAP[event.key], ("key", event.key), False)
-        elif event.type == pygame.JOYDEVICEADDED:
+        elif event.type == getattr(pygame, "JOYDEVICEADDED", None):
             joystick = pygame.joystick.Joystick(event.device_index)
             joystick.init()
-            self._joysticks[joystick.get_instance_id()] = joystick
-        elif event.type == pygame.JOYDEVICEREMOVED:
+            self._joysticks[self._joystick_id(joystick)] = joystick
+        elif event.type == getattr(pygame, "JOYDEVICEREMOVED", None):
             instance_id = self._instance_id(event)
             self._remove_joystick_sources(instance_id)
             self._joysticks.pop(instance_id, None)
@@ -492,7 +497,7 @@ def main() -> int:
         for device_index in range(pygame.joystick.get_count()):
             joystick = pygame.joystick.Joystick(device_index)
             joystick.init()
-            inputs._joysticks[joystick.get_instance_id()] = joystick
+            inputs._joysticks[inputs._joystick_id(joystick)] = joystick
         flags = pygame.FULLSCREEN if args.fullscreen else 0
         display = pygame.display.set_mode((0, 0) if args.fullscreen else (960, 720), flags)
         pygame.display.set_caption(f"SGBA: {game_title}")
@@ -512,6 +517,8 @@ def main() -> int:
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False
                 inputs.process(event)
+                if inputs.down("start") and inputs.down("select"):
+                    running = False  # Start+Select exits on devices with no Esc key
                 handler = getattr(game, "handle_event", None)
                 if callable(handler):
                     handler(event)

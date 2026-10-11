@@ -12,6 +12,9 @@ Latest verified runtime/package code: 86ac857780da89a177479574a200e79c4961209a
 4. Run checks when possible. Distinguish CI from physical R36S validation.
 5. Do not install anything on the R36S, alter firmware/system files, or change global Python. Device work requires verified target details and explicit approval.
 
+## Target requirement (owner, 2026-10-11)
+Must run on any version of the R36S running ArkOS 2, and on Windows PC. Implemented as: Python 3.8 and pygame 2.0 minimum (CI job on 3.8 + pygame 2.0.1, Ubuntu 22.04 and Windows), pygame-1.x-tolerant joystick ids, run_arkos.sh launcher (system python3, no install, logs to sgba_launch.log), Start+Select quit. Unverified on real ArkOS: whether the device has Python 3 and pygame installed (if not, nothing in this repo can run there without installing them, which needs owner approval), and whether pad buttons arrive via gptokeyb keys or SDL joystick.
+
 ## Objective
 Build a small, predictable, device-agnostic Python/Pygame virtual console for AI-generated 2D games shared between Windows and a future R36S handheld with 1 GiB RAM. Prioritize stable 60 Hz simulation, low memory use, and a constrained API coding agents can follow.
 
@@ -87,6 +90,7 @@ Direction (owner, 2026-10-11): no more device information is available. The runt
 - No R36S deployment or performance test has occurred.
 
 ## Change log
+- 2026-10-11: ArkOS 2 / Windows support work: Python 3.8 and pygame 2.0 floor with CI job, joystick-id fallback, run_arkos.sh, Start+Select quit. Tested locally on Python 3.8/pygame 2.0.1 and 3.13/2.6.1; not on hardware.
 - 2026-10-11: Recorded relayed R36S device facts, stated the device-agnostic direction (device probe tool removed), refreshed CI status for P1/P2/P5 from GitHub Actions on ae8b8d3, removed duplicate bullet.
 - 2026-10-11: Added `.sgba` version 1 ZIP-compatible game packages, manifest validation, archive/path/size guards, runtime extraction/loading, packaging CLI, regression tests, and documentation. Desktop CI passed after merge; no R36S testing.
 - 2026-10-11: Made AI-owned packaging mandatory: game agents must generate and validate `.sgba` files and include them in deliverables; never ask the user to run terminal commands.
