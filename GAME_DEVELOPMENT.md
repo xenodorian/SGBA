@@ -21,7 +21,7 @@ Logical actions: up, down, left, right, a, b, x, y, start, select, guide, l1, r1
 - Development source: `games/<game_name>/main.py`, optional `game.json`, optional `assets/`, and optional sibling Python modules.
 - Distributed package: one `.sgba` ZIP-compatible file containing root `manifest.json`, `main.py`, optional `game.json`, optional `assets/`, and any sibling modules.
 - Package manifest fields are `format` (`"sgba"`), `format_version` (`1`), `title` (1-80 characters), and `entry_point` (relative `.py` path). The standard entry point is `main.py`.
-- Create packages with `python tools/package_game.py games/<game_name>`; optionally provide an output path and `--title`.
+- AI agents creating or modifying a game must build and validate the `.sgba` package themselves and include it in the repository deliverable. Never leave packaging or terminal commands as a task for the user. The repository packaging tool is `tools/package_game.py`.
 - Runtime validates package paths, manifest version, archive integrity, file count, and size limits before extracting to a temporary cache. Limits: 32 MiB compressed, 64 MiB unpacked, 2,000 files, 16 MiB per file, and 64 KiB for `manifest.json`.
 - `.sgba` is a package of executable Python code, not a compiled console ROM. Validation does not sandbox game code.
 
