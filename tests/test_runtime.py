@@ -115,6 +115,55 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaises(MemoryError):
                 store.image("large.png")
 
+    def test_sprite_sheet_frames_and_camera_clipping(self):
+        sheet_image = pygame.Surface((16, 8), pygame.SRCALPHA)
+        pygame.draw.rect(sheet_image, (255, 0, 0, 255), (0, 0, 8, 8))
+        pygame.draw.rect(sheet_image, (0, 255, 0, 255), (8, 0, 8, 8))
+        sheet = runtime.SpriteSheet(sheet_image, (8, 8))
+        self.assertEqual(len(sheet.frames), 2)
+        target = pygame.Surface((16, 8))
+        sheet.draw(target, 1, (8, 0), camera=(4, 0), clip=pygame.Rect(0, 0, 8, 8))
+        self.assertEqual(target.get_at((4, 2))[:3], (0, 255, 0))
+        self.assertEqual(target.get_at((12, 2))[:3], (0, 0, 0))
+
+    def test_scene_manager_switches_and_delegates(self):
+        class Scene:
+            def __init__(self, color):
+                self.color = color
+                self.updated = 0
+            def update(self, dt, inputs):
+                self.updated += 1
+            def draw(self, surface):
+                surface.fill(self.color)
+        scenes = runtime.SceneManager()
+        red, blue = Scene((255, 0, 0)), Scene((0, 0, 255))
+        scenes.add("red", red)
+        scenes.add("blue", blue)
+        scenes.update(runtime.FIXED_DT, runtime.InputState())
+        self.assertEqual(red.updated, 1)
+        scenes.switch("blue")
+        target = pygame.Surface((2, 2))
+        scenes.draw(target)
+        self.assertEqual(target.get_at((0, 0))[:3], (0, 0, 255))
+
+    def test_save_store_round_trip_and_size_limit(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = runtime.SaveStore(Path(temp) / "slot.json")
+            self.assertEqual(store.load({"coins": 0}), {"coins": 0})
+            store.save({"coins": 12, "items": ["key"]})
+            self.assertEqual(store.load(), {"coins": 12, "items": ["key"]})
+            with self.assertRaises(ValueError):
+                store.save({"text": "x" * (store.MAX_BYTES + 1)})
+
+    def test_draw_sprite_restores_clip_and_applies_camera(self):
+        target = pygame.Surface((10, 10))
+        sprite = pygame.Surface((2, 2))
+        sprite.fill((255, 255, 255))
+        original_clip = target.get_clip()
+        runtime.draw_sprite(target, sprite, (5, 5), camera=(2, 2), clip=pygame.Rect(0, 0, 4, 4))
+        self.assertEqual(target.get_at((3, 3))[:3], (255, 255, 255))
+        self.assertEqual(target.get_clip(), original_clip)
+
     def test_unknown_action_is_rejected(self):
         with self.assertRaises(ValueError):
             runtime.InputState().down("jump")
