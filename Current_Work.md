@@ -52,7 +52,10 @@ Status: IN PROGRESS
 Acceptance: each agent can identify current priorities, constraints, current state, and the next concrete task without relying on chat history.
 
 ### P2: Confirm desktop runtime correctness
-Status: READY
+Status: IN PROGRESS
+- Added `games/input_lab/main.py` for 640x480 dither, logical input indicators, raw SDL button indices 0-15, axes 0-5, hat values, and recent controller events.
+- Extended provisional runtime actions for guide, L1/R1, L2/R2, L3/R3, and right-stick directions; added keyboard test bindings and regression tests.
+- Run CI and record results. Raw SDL layout and physical labels remain unverified on R36S.
 - Review `runtime.py` and tests against current Pygame event behavior and the intended game API.
 - Check the runtime lifecycle, initial controller enumeration, hotplug, source-aware key/button/hat/axis state, frame-based pressed/released semantics, invalid game paths, game-load errors, and shutdown cleanup.
 - Add regression tests for verified issues only; do not speculate about hardware mappings.
@@ -108,3 +111,4 @@ Acceptance: target results are documented; never infer success from desktop CI.
 
 - 2026-10-11: Added source-aware input tracking and tests; latest CI run succeeded at commit `36b6446b4813dd5cecf73d2cf78fefe67e671a54`.
 - 2026-10-11: Added game template and initial game-development contract.
+- 2026-10-11: Added `games/input_lab/main.py`, extended controller actions and tests, and updated input documentation. Desktop CI and actual R36S controller mapping still require verification.
