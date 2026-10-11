@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pygame
 
-from sgba_package import PackageError, resolve_game_path
+from sgba_package import PackageError, resolve_game_path, validate_package
 
 DEFAULT_LOGICAL_SIZE = (640, 480)
 ALLOWED_LOGICAL_SIZES = {(240, 160), (320, 240), (640, 480)}
@@ -477,7 +477,10 @@ def main() -> int:
     parser.add_argument("game", nargs="?", default="games/demo/main.py", help="Path to a .sgba package or a development game .py file")
     parser.add_argument("--fullscreen", action="store_true", help="Run fullscreen while preserving aspect ratio")
     args = parser.parse_args()
+    game_title = "SGBA"
     try:
+        if Path(args.game).suffix.lower() == ".sgba":
+            game_title = validate_package(args.game)["title"]
         game_path = resolve_game_path(args.game)
         config = load_game_config(game_path)
     except (OSError, PackageError, RuntimeError) as exc:
@@ -492,7 +495,7 @@ def main() -> int:
             inputs._joysticks[joystick.get_instance_id()] = joystick
         flags = pygame.FULLSCREEN if args.fullscreen else 0
         display = pygame.display.set_mode((0, 0) if args.fullscreen else (960, 720), flags)
-        pygame.display.set_caption("SGBA")
+        pygame.display.set_caption(f"SGBA: {game_title}")
         logical_size = config["logical_size"]
         logical = pygame.Surface(logical_size, depth=32)
         clock = pygame.time.Clock()
