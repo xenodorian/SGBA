@@ -19,6 +19,17 @@ Must run on any version of the R36S running ArkOS 2, and on a Windows PC. The ha
 - Video: SDL auto driver first, then kmsdrm/x11/wayland/fbcon/directfb. Launcher prefers the device's own libSDL2 via LD_PRELOAD and retries without it if the first attempt fails within 20 seconds.
 Unverified on real hardware (nothing here has touched a device): LD_PRELOAD of the system SDL2 over the bundled one, KMSDRM/Mali display output, pad button numbering (the wizard exists because of this), audio, execute permission of the SD card mount, and 32-bit ArkOS builds (not supported; bundle is aarch64 only).
 
+## JavaScript game hosting (owner direction, 2026-10-11)
+Purpose: SGBA hosts browser games written in JavaScript (Parry Perry in xenodorian/Biboo, CryMon in xenodorian/CryMon) so they can be developed and tested on the web and run locally on PC and ArkOS handhelds with only a thin port. Python games remain supported.
+Implemented (spike, branch claude/epic-franklin-qljrs1): sgba_js.py (QuickJS-ng host, canvas 2D on pygame, Image, timers, rAF, events, localStorage, fetch for local files, gamepad from SGBA input) and sgba_js_shim.js (browser shim, tolerant DOM stub). JSGame is a normal SGBA game object, so menu, controller setup and packaging work unchanged. quickjs-ng 0.17.0.1 is bundled for ArkOS aarch64 and Windows (prebuilt wheels, pinned and checksummed). tools/js_spike.py runs a web folder headless and saves a screenshot. tests/test_js.py covers canvas, timers/rAF/microtask order, images and transforms, storage, gamepad, fetch.
+Spike result on Biboo web/ (Parry Perry): all scripts load with zero errors, the title screen renders from the real game code. Full suite (38 tests) passes with the bundled ARM64 Python under qemu. NOT run on hardware.
+Known gaps, in priority order:
+1. DOM UI. Biboo's start menu, loading bar, Menu button and in-game menus (ui.js) are HTML/CSS overlays that the shim only stubs. Each game needs a small canvas-drawn replacement (the "thin port"); a reusable helper in SGBA would make this cheap.
+2. Speed. On a desktop CPU the Biboo title screen costs about 8 ms per frame, mostly pygame blits of full-screen layers and gradients rebuilt every frame (JS itself is small). A handheld CPU will be several times slower, so caching gradients, avoiding per-draw alpha copies and pre-scaling layers is needed before the 16.7 ms budget can be met. Unmeasured on hardware.
+3. Rendering fidelity: Biboo title text lacks the gold gradient and outline of the browser version, and a black rectangle appears at the ground in the first frames (unexplained). Compare against the Chromium reference screenshot.
+4. Audio: only Sound playback of local files is forwarded; Web Audio nodes are silent stubs. Module scripts (type=module) are not supported. getImageData/putImageData are slow hex bridges.
+5. Packaging: a JS game needs a .sgba layout/manifest entry (entry main.py calling sgba_js.create_game_for) and a documented port recipe; CryMon (TypeScript/React/Vite build, 51 .ts files) would run from its built static output, and is far more DOM-heavy than Biboo, so its feasibility is unassessed.
+
 ## ArkOS 2 research (web, 2026-10-11)
 Source: geniot/arkos-docker installed.txt (reproduces ArkOS 2.0 developer-mode packages; not an official image listing): Ubuntu 19.10 base, python3 3.7.5, libsdl2-2.0-0 2.0.10, libc6 2.30, arm64 and armhf. No pygame package listed. Conclusion: system Python is 3.7 and pygame is probably NOT installed, so the project bundles its own Python and pygame instead of relying on the device. Developer-path floor remains Python 3.7, SDL 2.0.10. PortMaster ships its own runtimes per port rather than altering the OS. Unconfirmed: any pygame wheel for aarch64 cp37 using system SDL2 with KMSDRM video; pip availability on the device.
 
@@ -97,6 +108,7 @@ Direction (owner, 2026-10-11): no more device information is available. The runt
 - No R36S deployment or performance test has occurred.
 
 ## Change log
+- 2026-10-11: JS hosting spike (sgba_js.py, shim, tests, quickjs-ng in bundles). Biboo loads and renders its title screen with zero script errors; DOM menus, speed on handhelds and fidelity gaps remain.
 - 2026-10-11: Self-contained bundles for ArkOS aarch64 and Windows x64, on-screen shell (menu, controller wizard, error screen, logs), custom pad bindings, video-driver fallback, bundle CI jobs. Tested: full suite with bundled ARM64 Python 3.11 + pygame 2.6.1 under qemu, plus desktop 3.8 and 3.13. No hardware testing.
 - 2026-10-11: ArkOS 2 / Windows support work: Python 3.7 and pygame 2.0 floor with CI job, joystick-id fallback, run_arkos.sh, Start+Select quit. Tested locally on Python 3.7+/pygame 2.0.1 and 3.13/2.6.1; not on hardware.
 - 2026-10-11: Recorded relayed R36S device facts, stated the device-agnostic direction (device probe tool removed), refreshed CI status for P1/P2/P5 from GitHub Actions on ae8b8d3, removed duplicate bullet.

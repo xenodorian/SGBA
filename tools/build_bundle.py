@@ -38,6 +38,9 @@ TARGETS = {
         "pygame": (PYGAME_URL + "00/9e/0d8aa8cf93db2d2ee38ebaf1c7b61d0df36ded27eb726221719c150c673d/"
                    "pygame-2.6.1-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl",
                    "c31dbdb5d0217f32764797d21c2752e258e5fb7e895326538d82b5f75a0cd856"),
+        "quickjs": (PYGAME_URL + "66/1e/bf364ef846a1d36f2e7c424699d5b01b5c0eb852a0d7bae183e521742184/"
+                    "quickjs_ng-0.17.0.1-cp310-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+                    "b8f41e2230d96925e69d40c7bbb66a81535ca63a1941d0ac8a2456c53085bafe"),
         # pygame's wheel needs a system libz; ship one built for glibc 2.17 (Ubuntu 18.04 zlib 1.2.11).
         "libz_deb": ("http://ports.ubuntu.com/ubuntu-ports/pool/main/z/zlib/zlib1g_1.2.11.dfsg-0ubuntu2.2_arm64.deb",
                      "f635c78ffb4e13b1451a9b4ac7f68e8b3a29cdf3b60e85a5561441f2d46b3ea8"),
@@ -48,10 +51,13 @@ TARGETS = {
         "pygame": (PYGAME_URL + "d2/55/ca3eb851aeef4f6f2e98a360c201f0d00bd1ba2eb98e2c7850d80aabc526/"
                    "pygame-2.6.1-cp311-cp311-win_amd64.whl",
                    "91476902426facd4bb0dad4dc3b2573bc82c95c71b135e0daaea072ed528d299"),
+        "quickjs": (PYGAME_URL + "5b/67/623df580c13e7cc3bbce5b15c41658dfb753d99839fab25695eef99df34a/"
+                    "quickjs_ng-0.17.0.1-cp310-abi3-win_amd64.whl",
+                    "355511615baa17bc98092680f068e3536ea1ee5a650b16f59bf6871f497f3780"),
     },
 }
 
-RUNTIME_FILES = ("runtime.py", "sgba_package.py", "sgba_shell.py")
+RUNTIME_FILES = ("runtime.py", "sgba_package.py", "sgba_shell.py", "sgba_js.py", "sgba_js_shim.js")
 PACKAGED_GAMES = ("demo", "input_lab")   # games/template is a starter, not a game
 PYTHON_TRIM = ("test", "idlelib", "tkinter", "turtledemo", "ensurepip", "lib2to3", "pydoc_data",
                "distutils", "unittest/test")
@@ -226,6 +232,8 @@ def build(target: str, cache: Path, out_dir: Path) -> Path:
         wheel.extractall(site)
     for leftover in site.glob("pygame-*.data"):
         shutil.rmtree(leftover, ignore_errors=True)
+    with zipfile.ZipFile(io.BytesIO(download(*pins["quickjs"], cache))) as wheel:
+        wheel.extractall(site)
     for unused in ("docs", "tests", "examples", "__pyinstaller"):
         shutil.rmtree(site / "pygame" / unused, ignore_errors=True)
     for stub in (site / "pygame").glob("*.pyi"):
