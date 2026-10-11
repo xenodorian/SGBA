@@ -32,7 +32,7 @@ jobs:
         if: matrix.pygame
         run: python -m pip install pygame==${{ matrix.pygame }}
       - name: Compile Python files
-        run: python -m compileall -q runtime.py sgba_package.py games tests tools
+        run: python -m compileall -q runtime.py sgba_package.py sgba_shell.py games tests tools
       - name: Run tests
         env:
           SDL_VIDEODRIVER: dummy
@@ -43,3 +43,56 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
         run: python tools/benchmark_game.py games/demo/main.py --frames 120 --warmup 15 --max-average-ms 16.67
+
+  # Self-contained bundles: nothing needs to be installed on the target device or PC.
+  bundle-arkos-aarch64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ARM64 emulation
+        run: sudo apt-get update && sudo apt-get install -y qemu-user libc6-arm64-cross
+      - name: Build ArkOS bundle
+        run: python tools/build_bundle.py arkos-aarch64
+      - name: Run the test suite with the bundled ARM64 Python and pygame
+        env:
+          QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+          PYTHONNOUSERSITE: "1"
+        run: |
+          APP="$PWD/dist/SGBA-arkos-aarch64/sgba"
+          cd "$APP"
+          PYTHONPATH="$APP/site:$APP" qemu-aarch64 python/bin/python3.11 -m unittest discover -s "$GITHUB_WORKSPACE/tests" -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SGBA-arkos-aarch64
+          path: dist/SGBA-arkos-aarch64.zip
+
+  bundle-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build Windows bundle
+        run: python tools/build_bundle.py windows-x64
+      - name: Run the test suite with the bundled Python and pygame
+        shell: pwsh
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
+          PYTHONNOUSERSITE: "1"
+        run: |
+          $app = Join-Path $PWD "dist/SGBA-windows-x64/sgba"
+          $env:PYTHONPATH = "$app\site;$app"
+          Set-Location $app
+          & "$app\python\python.exe" -m unittest discover -s "$env:GITHUB_WORKSPACE\tests" -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SGBA-windows-x64
+          path: dist/SGBA-windows-x64.zip

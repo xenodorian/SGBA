@@ -8,12 +8,15 @@ The native runtime uses a fixed 60 Hz simulation loop, a default 640×480 logica
 
 Low-end handhelds such as the R36S have about 1 GiB RAM shared with the operating system and running software. Memory and frame time are design constraints. The runtime cannot guarantee 60 FPS on untested hardware or against an unbounded game; generated games must follow the resource contract in GAME_DEVELOPMENT.md.
 
-## Supported targets
-- Windows PC and ArkOS 2.x handhelds (R36S class), plus other desktop Linux.
-- Minimum software: Python 3.7, pygame 2.0 with SDL2 (ArkOS 2 is Ubuntu 19.10 based: Python 3.7.5, SDL 2.0.10, glibc 2.30; pygame is probably not preinstalled there). Newer versions are also tested (3.11, 3.12, pygame 2.6.1).
-- ArkOS: copy this folder to the device and run `./run_arkos.sh <game or .sgba>`. It uses the system `python3` and pygame, installs nothing, and writes `sgba_launch.log` in the folder. If pygame is missing the log says so.
-- Input works from keyboard events (what `gptokeyb` sends) or directly from a gamepad. Start+Select quits on devices without an Esc key.
-- Compatibility is verified on desktop with Python 3.7+/pygame 2.0.1 in CI. It has not been run on ArkOS hardware.
+## Supported targets and how to run
+SGBA ships as a self-contained bundle: it carries its own Python and pygame, so nothing is installed on the device or PC.
+- **ArkOS handhelds (R36S class, 64-bit ARM):** build `SGBA-arkos-aarch64.zip` (`python tools/build_bundle.py arkos-aarch64`, or download it from the CI run). Unzip, copy `SGBA.sh` and the `sgba` folder to the SD card's Ports folder, then start "SGBA" from the Ports menu.
+- **Windows PC:** build `SGBA-windows-x64.zip` (`python tools/build_bundle.py windows-x64`). Unzip and double-click `SGBA.bat`.
+- **Developers:** `./run_linux.sh` or `run_windows.bat` after the setup script, with Python 3.7+ and pygame 2.0+.
+
+No keyboard or terminal is needed on a handheld. The engine draws its own game menu (D-pad and A), asks you to press each controller button once on first run (and under "Controller setup" later), shows errors on screen, and writes `sgba.log` and `sgba_launch.log`. In a game, hold START and SELECT together to return to the menu. Games are the `.sgba` files in the bundle's `games` folder.
+
+Verification status: CI runs the full test suite with the bundled ARM64 Python and pygame under emulation and with the bundled Windows Python. It has NOT run on ArkOS hardware. The launcher prefers the device's own SDL2 (so its screen and controller drivers are used) and falls back to the bundled SDL2 and then through other video drivers; none of that is verified on a real device.
 
 **Do not run the desktop Linux setup script on the R36S.** Firmware, CPU architecture, system libraries, Python, SDL support, and controller layout must be confirmed first. Do not modify the system installation or firmware.
 

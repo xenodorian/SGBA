@@ -13,10 +13,14 @@ Latest verified runtime/package code: 86ac857780da89a177479574a200e79c4961209a
 5. Do not install anything on the R36S, alter firmware/system files, or change global Python. Device work requires verified target details and explicit approval.
 
 ## Target requirement (owner, 2026-10-11)
-Must run on any version of the R36S running ArkOS 2, and on Windows PC. Implemented as: Python 3.7 and pygame 2.0 minimum (CI job on 3.7 + pygame 2.0.1, Ubuntu 22.04 and Windows), pygame-1.x-tolerant joystick ids, run_arkos.sh launcher (system python3, no install, logs to sgba_launch.log), Start+Select quit. Unverified on real ArkOS: whether the device has Python 3 and pygame installed (if not, nothing in this repo can run there without installing them, which needs owner approval), and whether pad buttons arrive via gptokeyb keys or SDL joystick.
+Must run on any version of the R36S running ArkOS 2, and on a Windows PC. The handheld has no keyboard, terminal, or internet, and the owner will not install anything: the project must be fully self-contained and work from the handheld's own menu. Implemented as:
+- Self-contained bundles (tools/build_bundle.py): ArkOS aarch64 (portable Python 3.11 + pygame 2.6.1 + libz, SGBA.sh launcher) and Windows x64 (SGBA.bat). All downloads are pinned and SHA-256 verified. CI builds both and runs the test suite with the bundled interpreters (ARM64 under qemu).
+- On-screen shell (sgba_shell.py): game menu, first-run controller setup wizard that records whatever the pad sends (button/hat/axis) to controls.json, on-screen error screen, sgba.log. Start+Select returns to the menu.
+- Video: SDL auto driver first, then kmsdrm/x11/wayland/fbcon/directfb. Launcher prefers the device's own libSDL2 via LD_PRELOAD and retries without it if the first attempt fails within 20 seconds.
+Unverified on real hardware (nothing here has touched a device): LD_PRELOAD of the system SDL2 over the bundled one, KMSDRM/Mali display output, pad button numbering (the wizard exists because of this), audio, execute permission of the SD card mount, and 32-bit ArkOS builds (not supported; bundle is aarch64 only).
 
 ## ArkOS 2 research (web, 2026-10-11)
-Source: geniot/arkos-docker installed.txt (reproduces ArkOS 2.0 developer-mode packages; not an official image listing): Ubuntu 19.10 base, python3 3.7.5, libsdl2-2.0-0 2.0.10, libc6 2.30, arm64 and armhf. No pygame package listed. Conclusion: supported floor is Python 3.7, SDL 2.0.10; pygame is probably NOT installed system-wide. PortMaster ships its own runtimes per port rather than altering the OS. Unconfirmed: any pygame wheel for aarch64 cp37 using system SDL2 with KMSDRM video; pip availability on the device.
+Source: geniot/arkos-docker installed.txt (reproduces ArkOS 2.0 developer-mode packages; not an official image listing): Ubuntu 19.10 base, python3 3.7.5, libsdl2-2.0-0 2.0.10, libc6 2.30, arm64 and armhf. No pygame package listed. Conclusion: system Python is 3.7 and pygame is probably NOT installed, so the project bundles its own Python and pygame instead of relying on the device. Developer-path floor remains Python 3.7, SDL 2.0.10. PortMaster ships its own runtimes per port rather than altering the OS. Unconfirmed: any pygame wheel for aarch64 cp37 using system SDL2 with KMSDRM video; pip availability on the device.
 
 ## Objective
 Build a small, predictable, device-agnostic Python/Pygame virtual console for AI-generated 2D games shared between Windows and a future R36S handheld with 1 GiB RAM. Prioritize stable 60 Hz simulation, low memory use, and a constrained API coding agents can follow.
@@ -93,6 +97,7 @@ Direction (owner, 2026-10-11): no more device information is available. The runt
 - No R36S deployment or performance test has occurred.
 
 ## Change log
+- 2026-10-11: Self-contained bundles for ArkOS aarch64 and Windows x64, on-screen shell (menu, controller wizard, error screen, logs), custom pad bindings, video-driver fallback, bundle CI jobs. Tested: full suite with bundled ARM64 Python 3.11 + pygame 2.6.1 under qemu, plus desktop 3.8 and 3.13. No hardware testing.
 - 2026-10-11: ArkOS 2 / Windows support work: Python 3.7 and pygame 2.0 floor with CI job, joystick-id fallback, run_arkos.sh, Start+Select quit. Tested locally on Python 3.7+/pygame 2.0.1 and 3.13/2.6.1; not on hardware.
 - 2026-10-11: Recorded relayed R36S device facts, stated the device-agnostic direction (device probe tool removed), refreshed CI status for P1/P2/P5 from GitHub Actions on ae8b8d3, removed duplicate bullet.
 - 2026-10-11: Added `.sgba` version 1 ZIP-compatible game packages, manifest validation, archive/path/size guards, runtime extraction/loading, packaging CLI, regression tests, and documentation. Desktop CI passed after merge; no R36S testing.

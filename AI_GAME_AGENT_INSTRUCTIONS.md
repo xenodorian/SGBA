@@ -62,3 +62,7 @@ Example:
 5. Build the `.sgba` package for every game creation/modification task and validate it with the repository loader. Include it in the deliverable; do not leave packaging as a user task.
 6. Update Current_Work.md with exact changes, test results, limitations, and next task.
 7. Never treat desktop CI as a hardware test.
+
+## Delivery and testing notes
+- Players run games from the on-screen menu, not a terminal. Games should work with the logical actions in `InputState` (d-pad, a/b/x/y, start/select, l1/r1/l2/r2) and must not require a keyboard or mouse.
+- Put the finished `.sgba` in `games/` so the bundle builder includes it, or give it to the user as a file.

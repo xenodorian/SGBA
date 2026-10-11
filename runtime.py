@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -592,6 +593,35 @@ def open_joysticks(inputs: "InputState") -> None:
             continue
 
 
+VIDEO_DRIVER_FALLBACKS = ("kmsdrm", "x11", "wayland", "fbcon", "directfb")
+
+
+def open_display(fullscreen: bool, log=lambda message: None) -> pygame.Surface:
+    """Open the window. Let SDL choose its driver first; if that fails, try the others in turn.
+
+    Handhelds run without a desktop, so the right driver varies by device and SDL build.
+    A driver the user set with SDL_VIDEODRIVER is respected and tried alone.
+    """
+    flags = pygame.FULLSCREEN if fullscreen else 0
+    size = (0, 0) if fullscreen else (960, 720)
+    explicit = os.environ.get("SDL_VIDEODRIVER")
+    candidates = [explicit] if explicit else [None] + list(VIDEO_DRIVER_FALLBACKS)
+    last_error = None
+    for driver in candidates:
+        try:
+            pygame.display.quit()
+            if driver is None:
+                os.environ.pop("SDL_VIDEODRIVER", None)
+            else:
+                os.environ["SDL_VIDEODRIVER"] = driver
+            pygame.display.init()
+            return pygame.display.set_mode(size, flags)
+        except pygame.error as exc:
+            last_error = exc
+            log(f"video driver {driver or 'auto'} failed: {exc}")
+    raise RuntimeError(f"No working video driver ({last_error})")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="SGBA lightweight Pygame runtime")
     parser.add_argument("game", nargs="?", default=None,
@@ -617,8 +647,7 @@ def main() -> int:
         inputs = InputState()
         open_joysticks(inputs)
         sgba_shell.apply_saved_controls(inputs)
-        flags = pygame.FULLSCREEN if args.fullscreen else 0
-        display = pygame.display.set_mode((0, 0) if args.fullscreen else (960, 720), flags)
+        display = open_display(args.fullscreen, sgba_shell.log)
         sgba_shell.log(f"video driver {pygame.display.get_driver()} size {display.get_size()} "
                        f"joysticks {pygame.joystick.get_count()}")
         pygame.display.set_caption(f"SGBA: {game_title}")

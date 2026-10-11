@@ -1,4 +1,9 @@
-.venv/
-__pycache__/
 *.py[cod]
 .DS_Store
+.bundle_cache/
+.venv/
+__pycache__/
+controls.json
+dist/
+sgba.log
+sgba_launch.log

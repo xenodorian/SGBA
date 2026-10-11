@@ -25,9 +25,14 @@ class ShellTests(unittest.TestCase):
     def setUpClass(cls):
         pygame.init()
         cls.display = pygame.display.set_mode((640, 480))
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls._log_patch = mock.patch.object(sgba_shell, "LOG_PATH", Path(cls._tmp.name) / "test.log")
+        cls._log_patch.start()   # keep test noise out of the real sgba.log
 
     @classmethod
     def tearDownClass(cls):
+        cls._log_patch.stop()
+        cls._tmp.cleanup()
         pygame.quit()
 
     def test_custom_bindings_replace_default_pad_map(self):
@@ -143,6 +148,34 @@ class ShellTests(unittest.TestCase):
         menu.update(0.016, inputs)
         self.assertIsNone(menu.choice)                      # disabled entries cannot start
         menu.draw(pygame.Surface(sgba_shell.MENU_SIZE))
+
+    def test_open_display_falls_back_through_drivers(self):
+        tried = []
+        real_init = pygame.display.init
+
+        def fake_init():
+            driver = os.environ.get("SDL_VIDEODRIVER")
+            tried.append(driver)
+            if driver != "x11":
+                raise pygame.error("no such driver")
+            os.environ["SDL_VIDEODRIVER"] = "dummy"   # stand in for a working x11
+            real_init()
+
+        saved = os.environ.pop("SDL_VIDEODRIVER", None)
+        try:
+            with mock.patch("pygame.display.init", fake_init):
+                surface = runtime.open_display(False)
+            self.assertEqual(tried, [None, "kmsdrm", "x11"])
+            self.assertIsNotNone(surface)
+            os.environ["SDL_VIDEODRIVER"] = "nonexistent"
+            with mock.patch("pygame.display.init", fake_init):
+                with self.assertRaises(RuntimeError):
+                    runtime.open_display(False)       # explicit choice is tried alone
+        finally:
+            os.environ["SDL_VIDEODRIVER"] = "dummy" if saved is None else saved
+            pygame.display.quit()
+            pygame.display.init()
+            type(self).display = pygame.display.set_mode((640, 480))
 
     def _run_shell(self, root, batches):
         script = iter(batches)
