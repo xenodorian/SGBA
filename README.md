@@ -24,7 +24,13 @@ Requirements: Python 3.11 or 3.12.
 
 Setup creates a project-local .venv and does not install packages globally. If setup fails, inspect the error instead of installing system packages. Run checks using test_windows.bat or ./test_linux.sh.
 
-To launch fullscreen, pass --fullscreen. To launch a specific game, pass its path, for example run_windows.bat games/my_game/main.py or ./run_linux.sh games/my_game/main.py. Without a path, the demo starts.
+To launch fullscreen, pass --fullscreen. To launch a packaged game, pass its `.sgba` path, for example `run_windows.bat games/my_game.sgba` or `./run_linux.sh games/my_game.sgba`. Development folders can still be launched directly with a path to `main.py`. Without a path, the demo starts.
+
+## `.sgba` game packages
+
+`.sgba` is SGBA's versioned game distribution format. It is a ZIP-compatible archive containing a root `manifest.json`, `main.py`, optional `game.json`, optional `assets/`, and any additional Python modules. The manifest identifies the format/version, display title, and entry point. The runtime validates the package before extracting it to a temporary cache and launching it. Packages are limited to 32 MiB compressed, 64 MiB unpacked, 2,000 files, and 16 MiB per file. These checks validate package structure and size, not the safety of Python code inside a package. Game code is executable and is not sandboxed.
+
+Create a package with `python tools/package_game.py games/my_game` or add an output path: `python tools/package_game.py games/my_game dist/my_game.sgba`. Use `--title "My Game"` to set its displayed title. The output must use the `.sgba` extension. Package format version 1 uses ZIP/Deflate and `manifest.json`; the file extension itself is not a security boundary.
 
 ## Game API
 Each game exports create_game(), returning an object with required draw(surface) and optional update(dt, inputs) and handle_event(event). Runtime owns display setup, event polling, fixed-step updates, scaling, and display flip. update() runs at 60 Hz with dt == 1/60. Input provides down(action), pressed(action), and released(action).
