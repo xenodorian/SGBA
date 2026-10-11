@@ -179,6 +179,91 @@ class SpriteSheet:
         surface.set_clip(old_clip)
 
 
+
+class Animation:
+    """Small frame-index animation advanced by fixed simulation time."""
+    def __init__(self, frames: list[int] | tuple[int, ...],
+                 frame_duration: float = 0.1, loop: bool = True) -> None:
+        if not frames or frame_duration <= 0:
+            raise ValueError("Animation needs frames and a positive frame duration")
+        self.frames = tuple(int(frame) for frame in frames)
+        self.frame_duration = float(frame_duration)
+        self.loop = bool(loop)
+        self.elapsed = 0.0
+        self.position = 0
+        self.finished = False
+
+    @property
+    def frame(self) -> int:
+        return self.frames[self.position]
+
+    def reset(self) -> None:
+        self.elapsed = 0.0
+        self.position = 0
+        self.finished = False
+
+    def update(self, dt: float) -> None:
+        if self.finished or dt <= 0:
+            return
+        self.elapsed += dt
+        steps = int(self.elapsed / self.frame_duration)
+        if steps:
+            self.elapsed -= steps * self.frame_duration
+            next_position = self.position + steps
+            if self.loop:
+                self.position = next_position % len(self.frames)
+            elif next_position >= len(self.frames):
+                self.position = len(self.frames) - 1
+                self.finished = True
+            else:
+                self.position = next_position
+
+
+class TileMap:
+    """Compact integer tile grid that draws only the visible camera region.
+
+    Tile index -1 is empty. All other indices refer to SpriteSheet frames.
+    """
+    def __init__(self, rows: list[list[int]] | tuple[tuple[int, ...], ...],
+                 tileset: SpriteSheet) -> None:
+        if not rows or not rows[0]:
+            raise ValueError("Tile map must contain at least one tile")
+        width = len(rows[0])
+        if any(len(row) != width for row in rows):
+            raise ValueError("Tile map rows must have equal width")
+        for row in rows:
+            for tile in row:
+                if tile != -1 and not 0 <= tile < len(tileset.frames):
+                    raise ValueError(f"Invalid tile index: {tile}")
+        self.rows = tuple(tuple(int(tile) for tile in row) for row in rows)
+        self.tileset = tileset
+        self.tile_width = tileset.frame_width
+        self.tile_height = tileset.frame_height
+        self.width = width
+        self.height = len(rows)
+        self.pixel_width = self.width * self.tile_width
+        self.pixel_height = self.height * self.tile_height
+
+    def draw(self, surface: pygame.Surface, camera: tuple[float, float] = (0, 0),
+             clip: pygame.Rect | None = None) -> None:
+        old_clip = surface.get_clip()
+        visible = old_clip if clip is None else old_clip.clip(clip)
+        surface.set_clip(visible)
+        left = max(0, int(camera[0] // self.tile_width))
+        top = max(0, int(camera[1] // self.tile_height))
+        right = min(self.width, int((camera[0] + visible.width) // self.tile_width) + 2)
+        bottom = min(self.height, int((camera[1] + visible.height) // self.tile_height) + 2)
+        for row_index in range(top, bottom):
+            row = self.rows[row_index]
+            for column in range(left, right):
+                tile = row[column]
+                if tile >= 0:
+                    surface.blit(self.tileset.frame(tile),
+                                 (round(column * self.tile_width - camera[0]),
+                                  round(row_index * self.tile_height - camera[1])))
+        surface.set_clip(old_clip)
+
+
 class SceneManager:
     """Small explicit scene registry; scenes implement update/draw and optionally handle_event."""
     def __init__(self) -> None:
