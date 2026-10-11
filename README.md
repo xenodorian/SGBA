@@ -22,7 +22,7 @@ To run automated checks after setup:
 - Windows: `test_windows.bat`
 - Linux desktop: `./test_linux.sh`
 
-To launch fullscreen, pass `--fullscreen` to the launcher.
+To launch fullscreen, pass `--fullscreen` to the launcher. To launch a specific game, pass its Python file path, for example `run_windows.bat games/my_game/main.py` or `./run_linux.sh games/my_game/main.py`. Without a path, the demo starts.
 
 ## Game API
 
@@ -34,8 +34,10 @@ A game file exports `create_game()`, returning an object with:
 
 The shared input object exposes `down(action)`, `pressed(action)`, and `released(action)`. Actions: `up`, `down`, `left`, `right`, `a`, `b`, `x`, `y`, `start`, `select`.
 
-Keyboard defaults: arrows/WASD for directions, Z/Space for A, X/Left Ctrl for B, Q for X, E for Y, Enter for Start, and Backspace for Select. Controller mappings still need real-device testing.
+Keyboard defaults: arrows/WASD for directions, Z/Space for A, X/Left Ctrl for B, Q for X, E for Y, Enter for Start, and Backspace for Select. Controller mappings are provisional until tested on the target hardware.
 
 ## Compatibility plan
 
 PC and handheld should use the same runtime version and game API. Platform-specific packaging, display scaling, and controller adapters may differ, but game rules and logical rendering should remain consistent. The next handheld step is identifying its firmware and CPU architecture, then testing a reversible, self-contained package without touching the system installation.
+
+See [Game Development Contract](GAME_DEVELOPMENT.md) for rules intended to keep AI-generated games portable. A starter file is available at `games/template/main.py`.
