@@ -142,6 +142,127 @@ class AssetStore:
         return self._image_bytes
 
 
+
+class SpriteSheet:
+    """Row-major sprite-sheet view with optional camera offset and clipping."""
+    def __init__(self, image: pygame.Surface, frame_size: tuple[int, int],
+                 margin: int = 0, spacing: int = 0) -> None:
+        self.image = image
+        self.frame_width, self.frame_height = frame_size
+        if self.frame_width <= 0 or self.frame_height <= 0 or margin < 0 or spacing < 0:
+            raise ValueError("Frame sizes must be positive; margin and spacing cannot be negative")
+        self.frames: list[pygame.Surface] = []
+        y = margin
+        while y + self.frame_height <= image.get_height() - margin:
+            x = margin
+            while x + self.frame_width <= image.get_width() - margin:
+                self.frames.append(image.subsurface((x, y, self.frame_width, self.frame_height)))
+                x += self.frame_width + spacing
+            y += self.frame_height + spacing
+        if not self.frames:
+            raise ValueError("Sprite sheet contains no complete frames")
+
+    def frame(self, index: int) -> pygame.Surface:
+        try:
+            return self.frames[index]
+        except IndexError as exc:
+            raise IndexError(f"Sprite frame index out of range: {index}") from exc
+
+    def draw(self, surface: pygame.Surface, index: int, position: tuple[float, float],
+             camera: tuple[float, float] = (0, 0),
+             clip: pygame.Rect | None = None) -> None:
+        old_clip = surface.get_clip()
+        if clip is not None:
+            surface.set_clip(old_clip.clip(clip))
+        surface.blit(self.frame(index), (round(position[0] - camera[0]),
+                                         round(position[1] - camera[1])))
+        surface.set_clip(old_clip)
+
+
+class SceneManager:
+    """Small explicit scene registry; scenes implement update/draw and optionally handle_event."""
+    def __init__(self) -> None:
+        self._scenes: dict[str, object] = {}
+        self.current_name: str | None = None
+
+    @property
+    def current(self):
+        return self._scenes.get(self.current_name) if self.current_name is not None else None
+
+    def add(self, name: str, scene: object) -> None:
+        if not name or name in self._scenes:
+            raise ValueError(f"Scene name must be non-empty and unique: {name!r}")
+        if not callable(getattr(scene, "draw", None)):
+            raise ValueError("Scene must implement draw(surface)")
+        self._scenes[name] = scene
+        if self.current_name is None:
+            self.current_name = name
+
+    def switch(self, name: str) -> None:
+        if name not in self._scenes:
+            raise KeyError(f"Unknown scene: {name}")
+        self.current_name = name
+
+    def handle_event(self, event: pygame.event.Event) -> None:
+        handler = getattr(self.current, "handle_event", None)
+        if callable(handler):
+            handler(event)
+
+    def update(self, dt: float, inputs: "InputState") -> None:
+        updater = getattr(self.current, "update", None)
+        if callable(updater):
+            updater(dt, inputs)
+
+    def draw(self, surface: pygame.Surface) -> None:
+        if self.current is None:
+            raise RuntimeError("SceneManager has no current scene")
+        self.current.draw(surface)
+
+
+class SaveStore:
+    """Small JSON save file at an explicit caller-chosen path, capped at 256 KiB."""
+    MAX_BYTES = 256 * 1024
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path).resolve()
+
+    def load(self, default: dict | None = None) -> dict:
+        if not self.path.exists():
+            return dict(default or {})
+        if self.path.stat().st_size > self.MAX_BYTES:
+            raise ValueError("Save file exceeds 256 KiB")
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"Cannot read save file: {exc}") from exc
+        if not isinstance(data, dict):
+            raise ValueError("Save data must be a JSON object")
+        return data
+
+    def save(self, data: dict) -> None:
+        if not isinstance(data, dict):
+            raise TypeError("Save data must be a dictionary")
+        encoded = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if len(encoded) > self.MAX_BYTES:
+            raise ValueError("Save data exceeds 256 KiB")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
+        temporary.write_bytes(encoded)
+        temporary.replace(self.path)
+
+
+def draw_sprite(surface: pygame.Surface, image: pygame.Surface,
+                position: tuple[float, float],
+                camera: tuple[float, float] = (0, 0),
+                clip: pygame.Rect | None = None) -> None:
+    """Blit one image with an optional camera offset and destination clip."""
+    old_clip = surface.get_clip()
+    if clip is not None:
+        surface.set_clip(old_clip.clip(clip))
+    surface.blit(image, (round(position[0] - camera[0]), round(position[1] - camera[1])))
+    surface.set_clip(old_clip)
+
+
 class InputState:
     """Source-aware logical input; edges persist until a simulation tick consumes them."""
     def __init__(self) -> None:
