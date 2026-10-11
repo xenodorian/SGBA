@@ -147,6 +147,16 @@ class RuntimeTests(unittest.TestCase):
         game.draw(surface)
         self.assertEqual(surface.get_size(), (640, 480))
 
+    def test_input_lab_loads_and_draws(self):
+        game = runtime.load_game(ROOT / "games" / "input_lab" / "main.py")
+        surface = pygame.Surface(runtime.LOGICAL_SIZE)
+        game.draw(surface)
+        self.assertEqual(surface.get_size(), (640, 480))
+        game.handle_event(pygame.event.Event(
+            pygame.JOYBUTTONDOWN, instance_id=2, button=0
+        ))
+        self.assertIn(0, game.buttons_down)
+
 
 if __name__ == "__main__":
     unittest.main()
