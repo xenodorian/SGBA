@@ -9,7 +9,7 @@ from pathlib import Path
 import pygame
 
 LOGICAL_SIZE = (640, 480)
-ACTIONS = ("up", "down", "left", "right", "a", "b", "x", "y", "start", "select")
+ACTIONS = ("up", "down", "left", "right", "a", "b", "x", "y", "start", "select", "guide", "l1", "r1", "l2", "r2", "l3", "r3", "rs_up", "rs_down", "rs_left", "rs_right")
 
 KEY_MAP = {
     pygame.K_UP: "up", pygame.K_w: "up",
@@ -20,12 +20,16 @@ KEY_MAP = {
     pygame.K_x: "b", pygame.K_LCTRL: "b",
     pygame.K_q: "x", pygame.K_e: "y",
     pygame.K_RETURN: "start", pygame.K_BACKSPACE: "select",
+    pygame.K_7: "guide", pygame.K_1: "l1", pygame.K_2: "r1",
+    pygame.K_3: "l2", pygame.K_4: "r2", pygame.K_5: "l3", pygame.K_6: "r3",
+    pygame.K_j: "rs_left", pygame.K_l: "rs_right", pygame.K_i: "rs_up", pygame.K_k: "rs_down",
 }
 
 # Common SDL joystick button order. Device-specific mapping may be needed
 # after checking the actual R36S firmware and controller event layout.
 BUTTON_MAP = {
-    0: "a", 1: "b", 2: "x", 3: "y", 4: "select", 6: "start",
+    0: "a", 1: "b", 2: "x", 3: "y", 4: "select", 5: "guide", 6: "start",
+    7: "l3", 8: "r3", 9: "l1", 10: "r1",
 }
 
 
@@ -96,13 +100,21 @@ class InputState:
                                  ("up", y > 0), ("down", y < 0)):
                 source = ("joyhat", instance_id, hat, action)
                 self._set(action, source, down)
-        elif event.type == pygame.JOYAXISMOTION and event.axis in (0, 1):
+        elif event.type == pygame.JOYAXISMOTION and event.axis in (0, 1, 2, 3, 4, 5):
             instance_id = self._instance_id(event)
             value = event.value
             if event.axis == 0:
                 states = (("left", value < -0.5), ("right", value > 0.5))
-            else:
+            elif event.axis == 1:
                 states = (("up", value < -0.5), ("down", value > 0.5))
+            elif event.axis == 2:
+                states = (("rs_left", value < -0.5), ("rs_right", value > 0.5))
+            elif event.axis == 3:
+                states = (("rs_up", value < -0.5), ("rs_down", value > 0.5))
+            elif event.axis == 4:
+                states = (("l2", value > 0.5),)
+            else:
+                states = (("r2", value > 0.5),)
             for action, down in states:
                 source = ("joyaxis", instance_id, event.axis, action)
                 self._set(action, source, down)
