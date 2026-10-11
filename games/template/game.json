@@ -1,0 +1,9 @@
+{
+  "logical_size": [
+    240,
+    160
+  ],
+  "asset_budget_mb": 8,
+  "max_image_dimension": 256,
+  "target_fps": 60
+}
