@@ -45,7 +45,8 @@ FACE = {
 
 
 def available_games():
-    paths = sorted(Path("games").glob("*/main.py"))
+    paths = sorted(path for path in Path("games").glob("*/main.py")
+                   if path.parent.name != "template")
     return paths or [Path("games/demo/main.py")]
 
 
@@ -68,10 +69,15 @@ def draw_controls(display, font, small_font, active_actions, game_path, game_ind
     display.blit(overlay, (0, 0))
 
     title = font.render("WEB PREVIEW", True, CYAN)
-    display.blit(title, (166, 9))
+    display.blit(title, (166, 5))
     game_name = game_path.parent.name
-    name = small_font.render(f"GAME {game_index + 1}/{game_count}: {game_name}  |  tap ◀ / ▶ to switch", True, INK)
-    display.blit(name, (166, 29))
+    name = small_font.render(f"GAME {game_index + 1}/{game_count}: {game_name}", True, INK)
+    display.blit(name, (166, 28))
+    for x, label in ((135, "<"), (460, ">")):
+        pygame.draw.rect(display, (32, 46, 68), (x, 8, 25, 30), border_radius=4)
+        pygame.draw.rect(display, (104, 128, 158), (x, 8, 25, 30), 1, border_radius=4)
+        image = font.render(label, True, INK)
+        display.blit(image, image.get_rect(center=(x + 12, 23)))
 
     for label, (x, y, w, h, action) in CONTROLS.items():
         active = action in active_actions
@@ -143,10 +149,12 @@ async def main():
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 set_pointer("mouse", event.pos)
                 if event.pos[1] < 46 and 135 <= event.pos[0] <= 160:
+                    release_pointer("mouse")
                     game_index = (game_index - 1) % len(games)
                     game_path = games[game_index]
                     game = runtime.load_game(game_path)
                 elif event.pos[1] < 46 and 460 <= event.pos[0] <= 486:
+                    release_pointer("mouse")
                     game_index = (game_index + 1) % len(games)
                     game_path = games[game_index]
                     game = runtime.load_game(game_path)
