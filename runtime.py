@@ -249,10 +249,14 @@ class TileMap:
         old_clip = surface.get_clip()
         visible = old_clip if clip is None else old_clip.clip(clip)
         surface.set_clip(visible)
-        left = max(0, int(camera[0] // self.tile_width))
-        top = max(0, int(camera[1] // self.tile_height))
-        right = min(self.width, int((camera[0] + visible.width) // self.tile_width) + 2)
-        bottom = min(self.height, int((camera[1] + visible.height) // self.tile_height) + 2)
+        world_left = camera[0] + visible.left
+        world_top = camera[1] + visible.top
+        world_right = camera[0] + visible.right
+        world_bottom = camera[1] + visible.bottom
+        left = max(0, int(world_left // self.tile_width))
+        top = max(0, int(world_top // self.tile_height))
+        right = min(self.width, int((world_right - 1) // self.tile_width) + 1)
+        bottom = min(self.height, int((world_bottom - 1) // self.tile_height) + 1)
         for row_index in range(top, bottom):
             row = self.rows[row_index]
             for column in range(left, right):
