@@ -1,0 +1,62 @@
+name: Web Preview
+
+on:
+  push:
+    paths:
+      - "runtime.py"
+      - "games/**"
+      - "web_preview/**"
+      - ".github/workflows/web-preview.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Pygbag
+        run: python -m pip install --upgrade pip pygbag
+
+      - name: Stage the shared runtime and games
+        run: |
+          mkdir -p "$RUNNER_TEMP/sgba-web-preview"
+          cp web_preview/main.py "$RUNNER_TEMP/sgba-web-preview/main.py"
+          cp runtime.py "$RUNNER_TEMP/sgba-web-preview/runtime.py"
+          cp -R games "$RUNNER_TEMP/sgba-web-preview/games"
+          cat > "$RUNNER_TEMP/sgba-web-preview/README.txt" <<'EOF'
+          Browser preview package. Runtime and games are staged from repository source.
+          EOF
+
+      - name: Build the WebAssembly preview
+        run: python -m pygbag --build "$RUNNER_TEMP/sgba-web-preview"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "$RUNNER_TEMP/sgba-web-preview/build/web"
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
