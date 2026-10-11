@@ -2,12 +2,14 @@ import json
 import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import pygame
 import runtime
+import sgba_package
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -200,6 +202,76 @@ class RuntimeTests(unittest.TestCase):
         game.draw(surface)
         game.handle_event(pygame.event.Event(pygame.JOYBUTTONDOWN, instance_id=2, button=0))
         self.assertIn(0, game.buttons_down)
+
+
+    def _write_sgba(self, path, manifest=None, members=None):
+        manifest = manifest or {
+            "format": "sgba", "format_version": 1,
+            "title": "Test Game", "entry_point": "main.py",
+        }
+        members = members or {"main.py": "def create_game():\n    return Game()\n"}
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+            for name, content in members.items():
+                archive.writestr(name, content)
+
+    def test_sgba_package_validates_and_extracts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = Path(temp) / "test.sgba"
+            self._write_sgba(package)
+            manifest = sgba_package.validate_package(package)
+            self.assertEqual(manifest["title"], "Test Game")
+            entry = sgba_package.resolve_game_path(package)
+            self.assertEqual(entry.name, "main.py")
+            self.assertTrue(entry.is_file())
+
+    def test_sgba_package_rejects_wrong_version_and_unsafe_paths(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            package = root / "wrong-version.sgba"
+            self._write_sgba(package, {"format": "sgba", "format_version": 2,
+                                       "title": "Test", "entry_point": "main.py"})
+            with self.assertRaises(sgba_package.PackageError):
+                sgba_package.validate_package(package)
+            package = root / "unsafe.sgba"
+            self._write_sgba(package, {"format": "sgba", "format_version": 1,
+                                       "title": "Test", "entry_point": "../main.py"})
+            with self.assertRaises(sgba_package.PackageError):
+                sgba_package.validate_package(package)
+
+    def test_sgba_package_rejects_archive_path_traversal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            package = Path(temp) / "traversal.sgba"
+            self._write_sgba(package, members={"main.py": "pass\n", "../outside.txt": "bad"})
+            with self.assertRaises(sgba_package.PackageError):
+                sgba_package.validate_package(package)
+
+    def test_packaging_tool_creates_loadable_sgba(self):
+        import importlib.util
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            game_dir = root / "tiny_game"
+            game_dir.mkdir()
+            (game_dir / "main.py").write_text(
+                "import pygame\nclass Game:\n"
+                "    def draw(self, surface): surface.fill((1, 2, 3))\n"
+                "def create_game(): return Game()\n",
+                encoding="utf-8",
+            )
+            (game_dir / "game.json").write_text(
+                json.dumps({"logical_size": [240, 160]}), encoding="utf-8")
+            spec = importlib.util.spec_from_file_location(
+                "sgba_package_game_tool", ROOT / "tools" / "package_game.py")
+            tool = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(tool)
+            output = root / "tiny_game.sgba"
+            tool.package_game(game_dir, output)
+            self.assertEqual(sgba_package.validate_package(output)["title"], "tiny game")
+            extracted = sgba_package.resolve_game_path(output)
+            game = runtime.load_game(extracted)
+            surface = pygame.Surface((240, 160))
+            game.draw(surface)
+            self.assertEqual(surface.get_at((0, 0))[:3], (1, 2, 3))
 
 
 if __name__ == "__main__":
