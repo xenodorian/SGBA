@@ -1,46 +1,41 @@
 # R36S PyGame Runtime
 
-A small, cross-platform Python/Pygame runtime for 2D games. The same game code should run on Windows during development and on the R36S handheld.
+A small, cross-platform Python/Pygame runtime for 2D games. The goal is to run the same game code on a Windows development PC and the R36S handheld.
 
 ## Current status
 
-This is an early proof of concept, not yet an installable R36S package. The initial target is a 640×480 logical display, gamepad-friendly input, and a minimal game API. The handheld deployment method will be chosen only after checking the R36S firmware and CPU architecture. Nothing here requires installing software on the handheld yet.
+This is an early proof of concept, not yet an installable R36S package. The logical game display is 640×480. The runtime provides a common game API, keyboard/gamepad actions, and aspect-preserving display scaling.
 
-## Run on a PC
+**Do not run the desktop Linux setup script on the R36S.** The handheld's firmware, CPU architecture, system libraries, and available Python version must be confirmed first. The eventual handheld package should be self-contained and must not modify system Python or firmware.
 
-1. Install Python 3.11 or 3.12.
-2. From this folder, install the pinned dependency in a virtual environment:
+## PC setup
 
-   `python -m venv .venv`
+Requirements: Python 3.11 or 3.12.
 
-   Windows:
-   ` .venv\Scripts\python -m pip install -r requirements.txt `
+- Windows: run `setup_windows.bat`, then `run_windows.bat`.
+- Linux desktop: run `sh setup_linux_pc.sh`, then `./run_linux.sh`.
 
-   Linux:
-   ` .venv/bin/python -m pip install -r requirements.txt `
+Setup creates a project-local `.venv` and installs the pinned Pygame dependency there. It does not install Python packages globally. If setup fails, stop and inspect the error instead of installing system packages.
 
-3. Launch the demo using `run_windows.bat` on Windows, or `./run_linux.sh` on Linux.
+To run automated checks after setup:
 
-You can also run it directly:
+- Windows: `test_windows.bat`
+- Linux desktop: `./test_linux.sh`
 
-```sh
-python runtime.py games/demo/main.py
-```
-
-Add `--fullscreen` for fullscreen mode.
+To launch fullscreen, pass `--fullscreen` to the launcher.
 
 ## Game API
 
 A game file exports `create_game()`, returning an object with:
 
-- `handle_event(event)`: optional; receives unhandled Pygame events.
+- `handle_event(event)`: optional; receives Pygame events.
 - `update(dt, inputs)`: optional; called each frame. `dt` is elapsed seconds.
 - `draw(surface)`: required; draws to a 640×480 Pygame surface.
 
 The shared input object exposes `down(action)`, `pressed(action)`, and `released(action)`. Actions: `up`, `down`, `left`, `right`, `a`, `b`, `x`, `y`, `start`, `select`.
 
-Keyboard defaults: arrows/WASD for directions, Z/Space for A, X/Left Ctrl for B, A for X, S for Y, Enter for Start, and Backspace for Select. Gamepad buttons are mapped to these same actions where SDL provides standard controller events.
+Keyboard defaults: arrows/WASD for directions, Z/Space for A, X/Left Ctrl for B, Q for X, E for Y, Enter for Start, and Backspace for Select. Controller mappings still need real-device testing.
 
-## Compatibility goal
+## Compatibility plan
 
-PC and handheld should use the same runtime version and game API. Screen scaling and platform launch scripts may differ, but game rules and logical rendering stay the same. Exact R36S packaging is not implemented until the firmware and CPU architecture are confirmed.
+PC and handheld should use the same runtime version and game API. Platform-specific packaging, display scaling, and controller adapters may differ, but game rules and logical rendering should remain consistent. The next handheld step is identifying its firmware and CPU architecture, then testing a reversible, self-contained package without touching the system installation.
