@@ -43,7 +43,7 @@ The target has 1 GiB RAM shared with the OS and runtime. Treat memory as scarce.
 ## Assets and manifest
 Develop in `games/<name>/main.py`, with optional `game.json`, `assets/`, and sibling Python modules. Resolve paths from `Path(__file__).resolve().parent`, never the current working directory. Supported `game.json` fields: logical_size, asset_budget_mb, max_image_dimension, target_fps. Supported sizes are 240×160, 320×240, and 640×480; target_fps is fixed at 60.
 
-For distribution, create a `.sgba` package with `python tools/package_game.py games/<name>`. The ZIP-compatible package has root `manifest.json`, `main.py`, optional `game.json`, optional `assets/`, and sibling modules. Format version 1 manifest fields are `format: "sgba"`, `format_version: 1`, `title`, and `entry_point`. Do not manually invent alternate package layouts. Package validation does not sandbox Python code.
+For distribution, the AI agent MUST create and validate a `.sgba` package as part of completing the task. Use the repository packaging tool from the agent's execution environment; never ask the user to run it or any terminal command. For repository-based work, commit the generated `.sgba` alongside the source unless the task explicitly requests a different delivery location. If the environment cannot execute tools or write the artifact, explain the specific limitation and do not describe packaging as completed. The ZIP-compatible package has root `manifest.json`, `main.py`, optional `game.json`, optional `assets/`, and sibling modules. Format version 1 manifest fields are `format: "sgba"`, `format_version: 1`, `title`, and `entry_point`. Do not manually invent alternate package layouts. Package validation does not sandbox Python code.
 
 Example:
 
@@ -59,5 +59,6 @@ Example:
 2. Make the smallest complete change.
 3. Validate imports, paths, manifest, and action names.
 4. Add headless tests where practical and run compile and unit tests.
-5. Update Current_Work.md with exact changes, test results, limitations, and next task.
-6. Never treat desktop CI as a hardware test.
+5. Build the `.sgba` package for every game creation/modification task and validate it with the repository loader. Include it in the deliverable; do not leave packaging as a user task.
+6. Update Current_Work.md with exact changes, test results, limitations, and next task.
+7. Never treat desktop CI as a hardware test.
