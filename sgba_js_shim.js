@@ -47,6 +47,7 @@
     }
     const q = rafQueue; rafQueue = [];
     for (const r of q) guard(r.fn, [now]);
+    if (g.__sgba_audio_tick) g.__sgba_audio_tick(now);
   };
 
   // ---- events
@@ -454,6 +455,7 @@
       tag = String(tag).toLowerCase();
       if (tag === 'canvas') { const c = new Canvas(); c.__detached = true; return c; }
       if (tag === 'img') { const i = new Image(); i.__detached = true; return i; }
+      if (tag === 'audio') return new g.Audio();
       const e = new Element(tag); e.__detached = true; return e;
     }
     createElementNS(ns, tag) { return this.createElement(tag); }
@@ -517,49 +519,176 @@
   g.Storage = Storage;
   g.localStorage = new Storage(); g.sessionStorage = new Storage();
 
-  // ---- fetch / XHR for local files
+  // ---- fetch / XHR for local files. Binary files (audio) are never copied into the script's memory: arrayBuffer()
+  // returns an empty buffer that remembers which file it stands for, and decodeAudioData hands that file to the audio engine.
+  const marker = (url, size) => { const ab = new ArrayBuffer(0); ab.__path = url; ab.__size = size; return ab; };
   g.fetch = (url) => {
-    const r = __py_read_text(String(url));
-    if (r === null || r === undefined) return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found', text: () => Promise.resolve(''), json: () => Promise.reject(new Error('404')), arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)) });
-    return Promise.resolve({ ok: true, status: 200, statusText: 'OK', url, headers: { get: () => null },
-      text: () => Promise.resolve(r), json: () => Promise.resolve().then(() => JSON.parse(r)), arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)), blob: () => Promise.resolve({}) });
+    url = String(url);
+    const size = __py_stat(url);
+    if (size < 0) return Promise.resolve({ ok: false, status: 404, statusText: 'Not Found', url, headers: { get: () => null },
+      text: () => Promise.resolve(''), json: () => Promise.reject(new Error('404')), arrayBuffer: () => Promise.reject(new Error('404')), blob: () => Promise.reject(new Error('404')) });
+    return Promise.resolve({ ok: true, status: 200, statusText: 'OK', url, headers: { get: (k) => (String(k).toLowerCase() === 'content-length' ? String(size) : null) },
+      text: () => Promise.resolve(__py_read_text(url) || ''),
+      json: () => Promise.resolve().then(() => JSON.parse(__py_read_text(url))),
+      arrayBuffer: () => Promise.resolve(marker(url, size)),
+      blob: () => Promise.resolve({ size, type: '', __path: url }) });
   };
   g.XMLHttpRequest = class XMLHttpRequest extends EventTarget {
     open(m, u) { this._u = u; this.readyState = 1; }
     setRequestHeader() {}
-    send() { const r = __py_read_text(String(this._u)); const self = this; g.setTimeout(() => {
-      self.readyState = 4; if (r === null || r === undefined) { self.status = 404; self.responseText = ''; } else { self.status = 200; self.responseText = r; self.response = r; }
+    send() { const size = __py_stat(String(this._u)); const self = this; g.setTimeout(() => {
+      self.readyState = 4;
+      if (size < 0) { self.status = 404; self.responseText = ''; }
+      else { self.status = 200; if (self.responseType === 'arraybuffer') self.response = marker(String(self._u), size); else { self.responseText = __py_read_text(String(self._u)) || ''; self.response = self.responseText; } }
       self.dispatchEvent(new Event('readystatechange')); self.dispatchEvent(new Event(self.status === 200 ? 'load' : 'error')); }, 0); }
   };
   g.URL = g.URL || class URL { constructor(u, b) { this.href = String(u); } };
-  g.URL.createObjectURL = () => ''; g.URL.revokeObjectURL = () => {};
+  g.URL.createObjectURL = (blob) => (blob && blob.__path) || ''; g.URL.revokeObjectURL = () => {};
   g.Blob = g.Blob || class Blob {};
   g.FileReader = g.FileReader || class FileReader {};
   g.TextEncoder = g.TextEncoder || class TextEncoder { encode(s) { const a = []; for (let i = 0; i < s.length; i++) a.push(s.charCodeAt(i) & 255); return new Uint8Array(a); } };
 
-  // ---- audio (silent stubs for now; calls are forwarded so Python can play them)
+  // ---- audio: Web Audio graph and <audio> mapped onto the host's compressed-streaming engine.
+  // Gains are worked out here (they can be automated over time) and sent to the engine only when they change.
+  let audioSeq = 1;
+  const active = new Map();                  // source id -> playing node
+  let ctxRef = null;
+  const audioNow = () => now / 1000;
+  class AudioParam {
+    constructor(v) { this._v = v === undefined ? 1 : v; this._ev = []; }
+    __at(t) {
+      let v = this._v, t0 = -Infinity;
+      const ev = this._ev;
+      for (let i = 0; i < ev.length; i++) {
+        const e = ev[i];
+        if (e.t > t) {
+          if (e.type === 'lin') { const k = (t - t0) / (e.t - t0 || 1); return v + (e.v - v) * Math.max(0, Math.min(1, k)); }
+          if (e.type === 'exp' && v > 0 && e.v > 0) { const k = (t - t0) / (e.t - t0 || 1); return v * Math.pow(e.v / v, Math.max(0, Math.min(1, k))); }
+          break;
+        }
+        if (e.type === 'target') { const next = ev[i + 1]; const end = next && next.t <= t ? next.t : t; v = e.v + (v - e.v) * Math.exp(-(end - e.t) / Math.max(1e-4, e.tc)); t0 = end; }
+        else { v = e.v; t0 = e.t; }
+      }
+      return v;
+    }
+    get value() { return this.__at(audioNow()); }
+    set value(x) { this._v = +x; this._ev = []; }
+    __add(e) { this._ev.push(e); this._ev.sort((a, b) => a.t - b.t); return this; }
+    setValueAtTime(v, t) { return this.__add({ type: 'set', v: +v, t: +t }); }
+    linearRampToValueAtTime(v, t) { return this.__add({ type: 'lin', v: +v, t: +t }); }
+    exponentialRampToValueAtTime(v, t) { return this.__add({ type: 'exp', v: +v, t: +t }); }
+    setTargetAtTime(v, t, tc) { return this.__add({ type: 'target', v: +v, t: +t, tc: +tc }); }
+    setValueCurveAtTime() { return this; }
+    cancelScheduledValues(t) { this._v = this.__at(audioNow()); this._ev = this._ev.filter((e) => e.t < t); return this; }
+    cancelAndHoldAtTime(t) { return this.cancelScheduledValues(t); }
+  }
+  class AudioNode extends EventTarget {
+    constructor() { super(); this.__out = new Set(); }
+    connect(n) { this.__out.add(n); return n; }
+    disconnect(n) { if (n) this.__out.delete(n); else this.__out.clear(); }
+  }
+  class GainNode extends AudioNode { constructor() { super(); this.gain = new AudioParam(1); } }
+  const gainTo = (node, dest, seen) => {            // best gain of any path from node to the destination
+    if (node === dest) return 1;
+    if (seen.has(node)) return 0;
+    seen.add(node);
+    let best = 0;
+    for (const n of node.__out) { const g2 = gainTo(n, dest, seen); if (g2 > best) best = g2; }
+    return node.gain && node instanceof GainNode ? best * node.gain.value : best;
+  };
+  const sourceGain = (src) => {
+    if (src.__ctx) return gainTo(src, src.__ctx.destination, new Set());
+    return Math.max(0, Math.min(1, src.muted ? 0 : src.volume));
+  };
+  const startSource = (src, bid, loop) => {
+    const id = audioSeq++;
+    src.__sid = id; src.__gain = sourceGain(src); src.__ended = false; src.__polls = 0;
+    active.set(id, src);
+    __py_audio_cmd('start', id, bid, src.__gain.toFixed(3) + ',' + (loop ? 1 : 0));
+  };
+  const stopSource = (src, fire) => {
+    if (src.__sid === undefined || !active.has(src.__sid)) return;
+    __py_audio_cmd('stop', src.__sid, 0, '');
+    active.delete(src.__sid); src.__sid = undefined;
+    if (fire) { src.__ended = true; src.dispatchEvent(new Event('ended')); }
+  };
+  // called every frame
+  g.__sgba_audio_tick = (t) => {
+    for (const [id, src] of active) {
+      if (src.__stopAt !== undefined && src.__stopAt <= t / 1000) { src.__stopAt = undefined; stopSource(src, true); continue; }
+      const gn = sourceGain(src);
+      if (Math.abs(gn - src.__gain) > 0.004) { src.__gain = gn; __py_audio_cmd('gain', id, gn, ''); }
+      if (!src.loop && ++src.__polls % 8 === 0 && !__py_audio_busy(id)) { active.delete(id); src.__sid = undefined; src.__ended = true; src.paused = true; src.dispatchEvent(new Event('ended')); }
+    }
+  };
+
+  class AudioBufferSourceNode extends AudioNode {
+    constructor(ctx) { super(); this.__ctx = ctx; this.buffer = null; this.loop = false; this.playbackRate = new AudioParam(1); this.detune = new AudioParam(0); this.onended = null; }
+    start(when) {
+      if (!this.buffer || this.buffer.__bid < 0 || this.__sid !== undefined) return;
+      const delay = (+when || 0) - audioNow();
+      const go = () => startSource(this, this.buffer.__bid, this.loop);
+      if (delay > 0.01) g.setTimeout(go, delay * 1000); else go();
+    }
+    stop(when) {
+      const delay = (+when || 0) - audioNow();
+      if (delay > 0.01) this.__stopAt = (+when); else stopSource(this, true);
+    }
+  }
+  class AudioContext extends EventTarget {
+    constructor() { super(); this.state = 'running'; this.sampleRate = 44100; this.destination = new AudioNode(); this.destination.maxChannelCount = 2; this.listener = {}; ctxRef = this; }
+    get currentTime() { return audioNow(); }
+    resume() { this.state = 'running'; return Promise.resolve(); } suspend() { this.state = 'suspended'; return Promise.resolve(); } close() { this.state = 'closed'; return Promise.resolve(); }
+    createGain() { return new GainNode(); }
+    createBufferSource() { return new AudioBufferSourceNode(this); }
+    createOscillator() { const n = new AudioNode(); n.frequency = new AudioParam(440); n.detune = new AudioParam(0); n.type = 'sine'; n.start = () => {}; n.stop = () => {}; return n; }
+    createBiquadFilter() { const n = new AudioNode(); n.frequency = new AudioParam(350); n.Q = new AudioParam(1); n.gain = new AudioParam(0); n.type = 'lowpass'; return n; }
+    createDynamicsCompressor() { return new AudioNode(); }
+    createStereoPanner() { const n = new AudioNode(); n.pan = new AudioParam(0); return n; }
+    createAnalyser() { const n = new AudioNode(); n.getByteFrequencyData = () => {}; n.getFloatTimeDomainData = () => {}; return n; }
+    createBuffer(c, l, r) { return { __bid: -1, length: l, sampleRate: r, numberOfChannels: c, duration: l / r, getChannelData: () => new Float32Array(l) }; }
+    decodeAudioData(ab, ok, no) {
+      const self = this;
+      const p = new Promise((res, rej) => {
+        const info = ab && ab.__path ? String(__py_audio_register(ab.__path)).split(',') : null;
+        if (!info || +info[0] < 0) { rej(new Error('cannot decode audio')); return; }
+        const dur = +info[1];
+        res({ __bid: +info[0], duration: dur, sampleRate: self.sampleRate, numberOfChannels: 2, length: Math.round(dur * self.sampleRate), getChannelData: () => new Float32Array(0) });
+      });
+      if (ok || no) p.then((b) => { if (ok) ok(b); }, (e) => { if (no) no(e); });
+      return p;
+    }
+  }
+  g.AudioContext = g.webkitAudioContext = g.OfflineAudioContext = AudioContext;
+  g.AudioBuffer = function AudioBuffer() {};
+
+  const AUDIO_TYPES = /\.(ogg|oga|mp3|wav|flac|opus)$|audio\/(ogg|mpeg|mp3|wav|x-wav|flac)/i;
   class Audio extends EventTarget {
-    constructor(src) { super(); this.src = src || ''; this.volume = 1; this.loop = false; this.paused = true; this.currentTime = 0; this.muted = false; this.readyState = 4; this.duration = 0; }
-    play() { this.paused = false; __py_audio('play', this.src, this.volume, this.loop); return Promise.resolve(); }
-    pause() { this.paused = true; __py_audio('stop', this.src, 0, false); }
-    load() {} cloneNode() { const a = new Audio(this.src); a.volume = this.volume; return a; }
-    canPlayType() { return 'maybe'; }
+    constructor(src) {
+      super(); this._src = ''; this.volume = 1; this.loop = false; this.paused = true; this.muted = false; this.readyState = 4;
+      this.duration = NaN; this.currentTime = 0; this.preload = 'auto'; this.autoplay = false; this.playbackRate = 1; this.ended = false;
+      if (src !== undefined) this.src = src;
+    }
+    get src() { return this._src; }
+    set src(v) { this._src = String(v); this._bid = undefined; }
+    __bufferId() {
+      if (this._bid === undefined) { const info = String(__py_audio_register(this._src)).split(','); this._bid = +info[0]; this.duration = +info[1]; }
+      return this._bid;
+    }
+    play() {
+      const bid = this.__bufferId();
+      if (bid < 0) return Promise.reject(new Error('NotSupportedError'));
+      stopSource(this, false);
+      this.paused = false; this.ended = false;
+      startSource(this, bid, this.loop);
+      return Promise.resolve();
+    }
+    pause() { this.paused = true; stopSource(this, false); }
+    load() {} canPlayType(t) { return AUDIO_TYPES.test(String(t)) ? 'maybe' : ''; }
+    cloneNode() { const a = new Audio(this._src); a.volume = this.volume; a.loop = this.loop; return a; }
+    get __ctx() { return null; }
   }
   g.Audio = g.HTMLAudioElement = Audio;
-  class AudioParam { constructor(v) { this.value = v === undefined ? 1 : v; } setValueAtTime() { return this; } linearRampToValueAtTime() { return this; } exponentialRampToValueAtTime() { return this; } setTargetAtTime() { return this; } cancelScheduledValues() { return this; } }
-  class AudioNode extends EventTarget { connect(n) { return n; } disconnect() {} }
-  class AudioContext extends EventTarget {
-    constructor() { super(); this.state = 'running'; this.currentTime = 0; this.sampleRate = 44100; this.destination = new AudioNode(); }
-    resume() { return Promise.resolve(); } suspend() { return Promise.resolve(); } close() { return Promise.resolve(); }
-    createGain() { const n = new AudioNode(); n.gain = new AudioParam(1); return n; }
-    createOscillator() { const n = new AudioNode(); n.frequency = new AudioParam(440); n.detune = new AudioParam(0); n.type = 'sine'; n.start = () => {}; n.stop = () => {}; return n; }
-    createBufferSource() { const n = new AudioNode(); n.start = () => {}; n.stop = () => {}; n.playbackRate = new AudioParam(1); n.buffer = null; return n; }
-    createBiquadFilter() { const n = new AudioNode(); n.frequency = new AudioParam(350); n.Q = new AudioParam(1); n.gain = new AudioParam(0); n.type = 'lowpass'; return n; }
-    createDynamicsCompressor() { return new AudioNode(); } createBuffer(c, l, r) { return { length: l, sampleRate: r, numberOfChannels: c, getChannelData: () => new Float32Array(l) }; }
-    createStereoPanner() { const n = new AudioNode(); n.pan = new AudioParam(0); return n; } createAnalyser() { const n = new AudioNode(); n.getByteFrequencyData = () => {}; return n; }
-    decodeAudioData() { return Promise.reject(new Error('not supported')); }
-  }
-  g.AudioContext = g.webkitAudioContext = AudioContext;
 
   // ---- input dispatch called from Python
   g.__sgba_key = (type, key, code, keyCode) => {

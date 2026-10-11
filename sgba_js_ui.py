@@ -361,6 +361,10 @@ class DomOverlay:
         self.height = 0
         self.focus_rects: dict = {}
         self.focus_indices: list = []
+        self.panel = None            # finished opaque panel image (corners keyed out)
+        self.panel_pos = (0, 0)
+        self.changed = True          # something visible changed since the last take_changed()
+        self.was_visible = False
         self.scroll = 0
         self.panels = 0
         self._get = host.ctx.get("__sgba_ui")
@@ -382,7 +386,9 @@ class DomOverlay:
         self.version = version
         data = json.loads(self._get())
         self.active = data["active"]
+        before = (self.panel is not None, self.scroll)
         self._build(data["roots"])
+        self.changed = True
 
     def _is_hotkey_root(self, root) -> bool:
         return root["t"] == "button" or (root.get("f") is not None and not root.get("k"))
@@ -397,6 +403,7 @@ class DomOverlay:
         self.focus_indices = []
         if not panels:
             self.surface = None
+            self.panel = None
             return
         panel_w = self.view[0] - 2 * PANEL_MARGIN
         layout = Layout(self.host, panel_w - 2 * PANEL_PAD)
@@ -416,6 +423,7 @@ class DomOverlay:
         self.surface = content
         self.cur_rect = layout.cur_rect
         self._scroll_to_focus()
+        self._compose()
 
     def _has_content(self, node) -> bool:
         if "x" in node:
@@ -466,25 +474,47 @@ class DomOverlay:
                 self.scroll = min(self.height - view_h, rect.bottom + 8 - view_h)
         self.scroll = max(0, min(self.scroll, self.height - view_h))
 
-    def draw(self, surface: pygame.Surface) -> None:
-        if self.surface is None:
-            return
-        veil = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
-        veil.fill((0, 0, 0, 110))
-        surface.blit(veil, (0, 0))
+    def _compose(self) -> None:
+        """Flatten the visible part of the panel into one opaque image, so drawing it is a plain fast blit."""
         panel_w = self.surface.get_width()
         view_h = min(self.height, self.view[1] - 2 * PANEL_MARGIN)
-        x = (surface.get_width() - panel_w) // 2
-        y = (surface.get_height() - view_h) // 2
-        panel = pygame.Surface((panel_w, view_h), pygame.SRCALPHA)
-        pygame.draw.rect(panel, BG + (235,), (0, 0, panel_w, view_h), border_radius=10)
+        key = (255, 0, 255)
+        panel = pygame.Surface((panel_w, view_h), 0, 16)
+        panel.fill(key)
+        pygame.draw.rect(panel, BG, (0, 0, panel_w, view_h), border_radius=10)
         pygame.draw.rect(panel, LINE, (0, 0, panel_w, view_h), 1, border_radius=10)
         panel.blit(self.surface, (0, 0), pygame.Rect(0, self.scroll, panel_w, view_h))
         if self.height > view_h:                           # scroll hint bar
             track = int(view_h * view_h / self.height)
             top = int(self.scroll * (view_h - track) / max(1, self.height - view_h))
             pygame.draw.rect(panel, (90, 90, 105), (panel_w - 5, top, 3, track), border_radius=2)
-        surface.blit(panel, (x, y))
+        panel.set_colorkey(panel.get_at((0, 0))[:3])
+        self.panel = panel
+        self.panel_pos = ((self.view[0] - panel_w) // 2, (self.view[1] - view_h) // 2)
+
+    @property
+    def visible(self) -> bool:
+        return self.panel is not None
+
+    def take_changed(self) -> bool:
+        """True once after the overlay appeared, disappeared or changed."""
+        changed = self.changed or self.visible != self.was_visible
+        self.changed = False
+        self.was_visible = self.visible
+        return changed
+
+    def draw(self, surface: pygame.Surface, region: pygame.Rect | None = None) -> None:
+        if self.panel is None:
+            return
+        region = surface.get_rect() if region is None else region
+        # darken what is behind the panel, then place the panel
+        if surface.get_bytesize() == 4:                    # a cached translucent tile blends far faster than a multiply fill
+            surface.blit(self.host.solid_tile(region.size, (0, 0, 0, 110)), region.topleft)
+        else:
+            surface.fill((145, 145, 145), region, special_flags=pygame.BLEND_RGB_MULT)
+        surface.set_clip(region)
+        surface.blit(self.panel, self.panel_pos)
+        surface.set_clip(None)
 
     # -- navigation
     default_focus = 0

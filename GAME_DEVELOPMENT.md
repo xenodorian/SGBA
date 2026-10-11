@@ -91,10 +91,25 @@ Run `python tools/benchmark_game.py games/my_game/main.py --frames 300` to measu
 
 ## JavaScript (browser) games
 
-SGBA also runs browser games written in JavaScript: a folder with `index.html`, scripts and assets, drawing to one 2D `<canvas>`. Develop and test them on the web as usual; the same folder runs in SGBA on PC and handhelds. Supported: canvas 2D, images, timers, `requestAnimationFrame`, keyboard, the Gamepad API (fed from SGBA's standard buttons), `localStorage`, `fetch` of local files. Not supported: WebGL, modules (`type="module"`), networking, real Web Audio.
+SGBA also runs browser games written in JavaScript: a folder with `index.html`, scripts and assets, drawing to one 2D `<canvas>`. Develop and test them on the web as usual; the same folder runs in SGBA on PC and handhelds. Supported: canvas 2D, images, timers, `requestAnimationFrame`, keyboard, the Gamepad API (fed from SGBA's standard buttons), `localStorage`, `fetch` of local files. Not supported: WebGL, modules (`type="module"`), networking, synthesized Web Audio (oscillators and filters are silent).
 
 **Buttons and menus.** HTML you place over the canvas (menus, loading bars, dialogs) is drawn by SGBA as one centred panel, and every `<button>` (and `a[href]`, `input`, `[tabindex]`) is a focusable row. No pointer is used. Two modes, chosen in an optional `sgba_ui.json` next to `index.html`:
 - `"navigation": "engine"` (default): D-pad Up/Down moves focus, A presses the focused button, B goes back (sends Escape, else presses a Back/Close/Cancel button). While a panel is open the pad is hidden from the game so A does not also attack.
 - `"navigation": "game"`: the game already moves focus itself from the Gamepad API (as Parry Perry does); SGBA only draws the panel and its focus highlight.
 - `"hotkeys": {"select": "btn-hud-start"}` presses the on-screen button with that id when a pad action fires and no panel is open (for a lone HUD button such as "Menu").
 Layout is simple on purpose: headings, text, tables, buttons stacked vertically, icons from small canvases, progress bars (`.bar > .fill` with a percentage width). Keep menu markup plain and it will lay out correctly; CSS beyond `display:none` is ignored.
+
+### How JavaScript games use memory, CPU and sound
+
+The engine is built like a small console, to fit a 1 GB handheld with most of the RAM already taken by the system:
+
+- **Drawing is retained and diffed.** Each frame the page's canvas calls are recorded, compared with the previous frame, and only the screen regions that changed are redrawn and sent to the display. A page that repaints the whole canvas every frame (draws an opaque background or cover first) gets this; pages that draw incrementally still work, just without the saving.
+- **Images are decoded on first use** into a compact format (opaque, or cut-out sprites with a colour key), kept in a byte-budgeted cache (`image_budget_mb`, default 96) and evicted least-recently-used. Pre-decode the images a level needs behind its loading screen with `"preload": ["assets/layers/*.png"]`.
+- **Sound stays compressed.** Music (Ogg Vorbis or MP3, over 96 KB) is streamed from the file by SDL_mixer; short effects are decoded at 22.05 kHz into a 6 MB cache. Use Web Audio `AudioBufferSourceNode` + `GainNode` (gain automation works) or `new Audio(...)`. Ogg is recommended.
+- **Frame skipping.** If the device is slow, frames that were never shown are dropped before being drawn; game logic still runs every tick.
+- **Colour.** The canvas is 32-bit by default (SDL blends it fastest); `"color_depth": 16` and `"image_depth": 16` cut memory to roughly half but make blending slower, so use them only if RAM is the limit.
+- **Telemetry.** Every ~10 seconds a line like `perf: 600 frames, update 1.3 ms, draw 2.1 ms, worst 63 ms, rss 95 MB, images 20/139 ...` is written to `sgba.log` and `sgba_launch.log`. After a play session on a device, send that file to see real timings.
+
+`sgba_ui.json` options: `navigation`, `hotkeys`, `color_depth` (16|32), `image_depth` (16|32), `rle` (true|false), `image_budget_mb`, `alpha` (`"threshold"` cuts faint anti-aliased edges on sprites to on/off transparency, `"keep"` preserves them), `preload`.
+
+Writing for the engine: avoid `getImageData`/`putImageData` (forces slow drawing), avoid per-frame full-screen translucent overlays and gradients (they are blended pixel by pixel), prefer sprite sheets under a few thousand pixels wide, and keep sound files under a few MB.

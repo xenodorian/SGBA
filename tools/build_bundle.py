@@ -57,7 +57,8 @@ TARGETS = {
     },
 }
 
-RUNTIME_FILES = ("runtime.py", "sgba_package.py", "sgba_shell.py", "sgba_js.py", "sgba_js_ui.py", "sgba_js_shim.js")
+RUNTIME_FILES = ("runtime.py", "sgba_package.py", "sgba_shell.py", "sgba_js.py", "sgba_js_ui.py", "sgba_js_shim.js",
+                 "sgba_canvas.py", "sgba_gfx.py", "sgba_audio.py")
 PACKAGED_GAMES = ("demo", "input_lab")   # games/template is a starter, not a game
 PYTHON_TRIM = ("test", "idlelib", "tkinter", "turtledemo", "ensurepip", "lib2to3", "pydoc_data",
                "distutils", "unittest/test")
@@ -198,6 +199,22 @@ def trim_python(python_dir: Path) -> None:
             path.unlink()
 
 
+def replace_fluidsynth(libs: Path) -> None:
+    """Swap the MIDI synthesizer (needs glib and libstdc++ from the system) for a stub that needs nothing."""
+    import platform
+    import subprocess
+    target = next(libs.glob("libfluidsynth-*"), None)
+    if target is None:
+        return
+    compiler = "gcc" if platform.machine() == "aarch64" else "aarch64-linux-gnu-gcc"
+    command = [compiler, "-shared", "-fPIC", "-O2", "-nostdlib", f"-Wl,-soname,{target.name}", "-o", str(target),
+               str(ROOT / "tools" / "stubs" / "fluidsynth_stub.c")]
+    try:
+        subprocess.run(command, check=True)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(f"cannot build the MIDI stub ({exc}). Install an aarch64 C compiler, e.g. `apt install gcc-aarch64-linux-gnu`.")
+
+
 def deb_member(deb: bytes, wanted_prefix: str) -> bytes:
     """Read one file out of a .deb (ar archive holding data.tar.xz) using only the stdlib."""
     assert deb[:8] == b"!<arch>\n"
@@ -238,6 +255,8 @@ def build(target: str, cache: Path, out_dir: Path) -> Path:
         shutil.rmtree(site / "pygame" / unused, ignore_errors=True)
     for stub in (site / "pygame").glob("*.pyi"):
         stub.unlink()
+    if target.startswith("arkos"):
+        replace_fluidsynth(site / "pygame.libs")
     if "libz_deb" in pins:
         libz = deb_member(download(*pins["libz_deb"], cache), "lib/aarch64-linux-gnu/libz.so.1.")
         (site / "pygame.libs" / "libz.so.1").write_bytes(libz)

@@ -53,7 +53,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install ARM64 emulation
-        run: sudo apt-get update && sudo apt-get install -y qemu-user libc6-arm64-cross
+        run: sudo apt-get update && sudo apt-get install -y qemu-user libc6-arm64-cross gcc-aarch64-linux-gnu
       - name: Build ArkOS bundle
         run: python tools/build_bundle.py arkos-aarch64
       - name: Run the test suite with the bundled ARM64 Python and pygame

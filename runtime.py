@@ -531,13 +531,22 @@ def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size:
     """Run one game or shell scene until it ends. Returns "closed" (window closed) or "done".
 
     A scene ends when it sets a truthy `finished` attribute, on Esc, or on Start+Select.
+
+    A game may set `retained = True`: its surface then keeps its pixels from frame to frame and draw() returns
+    the list of rectangles that changed (empty = nothing to show). Only those are copied to the screen, like a
+    console that updates just the parts of the picture that moved.
     """
     update = getattr(game, "update", None)
-    logical = pygame.Surface(logical_size, depth=32)
+    retained = bool(getattr(game, "retained", False))
+    depth = int(getattr(game, "surface_depth", 32))
+    logical = pygame.Surface(logical_size, 0, depth)
     clock = pygame.time.Clock()
     accumulator = 0.0
     inputs.consume_edges()  # presses from the previous scene (e.g. Start in Start+Select) must not leak in
     combo_armed = False  # a held Start+Select from the previous scene must be released first
+    display.fill((0, 0, 0))
+    pygame.display.flip()
+    scale_cache = None
     while True:
         inputs.begin_frame()
         for event in pygame.event.get():
@@ -572,14 +581,26 @@ def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size:
         if getattr(game, "finished", False):
             return "done"
 
-        logical.fill((0, 0, 0))
-        game.draw(logical)
+        if retained:
+            rects = game.draw(logical)
+            if rects is not None and not rects:
+                continue                                  # nothing changed: show nothing, spend nothing
+        else:
+            logical.fill((0, 0, 0))
+            game.draw(logical)
+            rects = None
+        dw, dh = display.get_size()
+        lw, lh = logical_size
+        if rects is not None and (dw, dh) == (lw, lh):    # one-to-one: copy only what changed
+            for r in rects:
+                display.blit(logical, r.topleft, r)
+            pygame.display.update(rects)
+            continue
+        scale = min(dw / lw, dh / lh)
+        scaled_size = (max(1, round(lw * scale)), max(1, round(lh * scale)))
         display.fill((0, 0, 0))
-        scale = min(display.get_width() / logical_size[0], display.get_height() / logical_size[1])
-        scaled_size = (max(1, round(logical_size[0] * scale)), max(1, round(logical_size[1] * scale)))
         frame = pygame.transform.scale(logical, scaled_size)
-        display.blit(frame, ((display.get_width() - scaled_size[0]) // 2,
-                             (display.get_height() - scaled_size[1]) // 2))
+        display.blit(frame, ((dw - scaled_size[0]) // 2, (dh - scaled_size[1]) // 2))
         pygame.display.flip()
 
 
