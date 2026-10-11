@@ -60,11 +60,8 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict:
     if not isinstance(title, str) or not title.strip() or len(title) > 80:
         raise PackageError("manifest title must contain 1 to 80 characters")
     entry_point = manifest.get("entry_point")
-    if not isinstance(entry_point, str):
-        raise PackageError("manifest entry_point must be a relative Python file path")
-    entry_point = _safe_member_name(entry_point)
-    if not entry_point.endswith(".py"):
-        raise PackageError("manifest entry_point must end in .py")
+    if entry_point != "main.py":
+        raise PackageError("manifest entry_point must be the standard root file main.py")
     manifest["entry_point"] = entry_point
     return manifest
 
