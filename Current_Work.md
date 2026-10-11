@@ -3,7 +3,7 @@
 Last updated: 2026-10-11
 Repository: xenodorian/SGBA
 Default branch: main
-Current head before this documentation update: 36b6446b4813dd5cecf73d2cf78fefe67e671a54
+Latest implementation commit recorded here: e9cbf24a12de68d2b87668b0cc538ea7ac564d74
 
 ## Agent handoff protocol
 
@@ -92,7 +92,15 @@ Status: BLOCKED ON REPOSITORY ADMIN ACTION
 - If still desired, rename through GitHub repository Settings > General > Repository name, then verify redirects and update any hard-coded references.
 Acceptance: new repository URL/name verified; old URL redirect behavior confirmed.
 
-### P7: Target-device validation
+### P7: Maintain the optional browser preview separately
+Status: IN PROGRESS
+- `web_preview/main.py` is a wrapper that uses the shared `runtime.py` and stages the current `games/` source files into a separate Pygbag/WebAssembly build.
+- `.github/workflows/web-preview.yml` is a dedicated Pages workflow. It runs independently from native desktop CI and does not change the native launcher, game API, or R36S packaging path.
+- Mobile wrapper controls cover D-pad, ABXY, shoulders/triggers, both stick directions, L3/R3, Start, and Select. The top-bar arrows switch between game files under `games/*/main.py`, excluding the template.
+- Latest preview workflow commit: `e9cbf24a12de68d2b87668b0cc538ea7ac564d74`. Deployment/build status has not yet been verified. First deployment may require GitHub Pages settings to permit GitHub Actions publishing.
+Acceptance: preview builds and deploys to Pages; mobile touch inputs work; changes remain isolated from the native game-development pipeline. A browser preview is not proof of R36S compatibility.
+
+### P8: Target-device validation
 Status: BLOCKED ON DEVICE ACCESS AND APPROVAL
 - After P5, test only a disposable/self-contained build and preserve a rollback path.
 - Validate launch/exit, fullscreen/aspect ratio, input mapping, unplug/reconnect behavior if applicable, frame pacing, asset loading, and performance.
@@ -103,7 +111,7 @@ Acceptance: target results are documented; never infer success from desktop CI.
 
 - No R36S installer or deployment package currently exists.
 - No device-specific controller mapping has been verified.
-- Do not switch frameworks (e.g. to LÖVE, browser/HTML, SDL bindings other than the current Pygame dependency) without explicit user direction and a concrete reason.
+- Do not switch the native runtime framework (e.g. to LÖVE or HTML/JavaScript) without explicit user direction and a concrete reason. The optional browser preview must remain a separate wrapper around the shared runtime/game source, never the target architecture for native game development.
 - Do not add networking, an editor, a plugin architecture, a game launcher UI, automatic update machinery, or broad asset tooling preemptively.
 - Preserve the existing simple PC workflow and avoid changing the user's global Python environment.
 
@@ -112,3 +120,5 @@ Acceptance: target results are documented; never infer success from desktop CI.
 - 2026-10-11: Added source-aware input tracking and tests; latest CI run succeeded at commit `36b6446b4813dd5cecf73d2cf78fefe67e671a54`.
 - 2026-10-11: Added game template and initial game-development contract.
 - 2026-10-11: Added `games/input_lab/main.py`, extended controller actions and tests, and updated input documentation. Desktop CI and actual R36S controller mapping still require verification.
+
+- 2026-10-11: Added the separate `web_preview/` wrapper and dedicated Pygbag/GitHub Pages workflow. This is an independent browser presentation build, not a replacement for native desktop/R36S game development. Pages deployment and mobile interaction still need verification.
