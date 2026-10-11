@@ -1,0 +1,3 @@
+[submodule "vendor/gba-emulator"]
+	path = vendor/gba-emulator
+	url = https://github.com/amyanger/gba-emulator.git
