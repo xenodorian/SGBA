@@ -26,7 +26,6 @@ Build a small, predictable Python/Pygame virtual console for AI-generated 2D gam
 - SpriteSheet provides row-major sprite frames. Animation advances frame indices by simulation time. TileMap stores compact tile indices and draws only the visible camera region. draw_sprite supports camera offsets and clipping.
 - SceneManager provides named scene switching and update/draw/event delegation. SaveStore handles compact JSON saves at an explicit writable path, capped at 256 KiB.
 - tools/benchmark_game.py measures update+draw average, p95, and maximum frame cost; CI benchmarks the demo against the 16.67 ms average budget.
-- SceneManager provides named scene switching and update/draw/event delegation. SaveStore handles compact JSON saves at an explicit writable path, capped at 256 KiB.
 - Starter game opts into 240×160 with an 8 MiB decoded-image budget and 256-pixel maximum image dimension.
 - AI game contract defines conservative RAM, asset, and frame-time budgets for 1 GiB hardware.
 - CI asset audit checks each game's assets directory against a 16 MiB total budget and 4 MiB per-file guardrail.
@@ -36,7 +35,7 @@ Build a small, predictable Python/Pygame virtual console for AI-generated 2D gam
 ## Verification status
 - `.sgba` implementation was merged to `main` in `86ac857780da89a177479574a200e79c4961209a`. Pull-request CI passed on Ubuntu and Windows with Python 3.11 and 3.12, including package tests, asset audit, and demo benchmark. The package format does not sandbox Python code. No R36S testing.
 - Automated tests cover manifest profiles, input-edge consumption, AssetStore caching/path/dimension/memory limits, sprite sheets, camera clipping, animation, tilemaps, scenes, and save files. CI also audits asset sizes and benchmarks the demo.
-- GitHub Actions runs for the newest runtime/API and benchmark changes are pending. GitHub Actions passed on commit eb18298846c86046910b63619a3a405c12dd1cc6 across Ubuntu and Windows with Python 3.11 and 3.12. This includes all 19 unit tests, the asset budget audit, and the demo benchmark. A documentation/handoff follow-up commit is current; its workflow rerun is queued. Do not mark the implementation verified until the latest run completes successfully.
+- Runtime checks (tests.yml) passed on current main ae8b8d3a44c7789a83c41592390ca02caa10b795 (run 71) and on every main commit since eb18298. Web Preview passed on main (run 17). Earlier red runs (Runtime checks 45/46, superseded) and Web Preview failures on the feature branch (pages deploy from a non-main branch) are not current.
 - No R36S deployment or performance test has occurred. Firmware, architecture, Python/SDL availability, and physical controller mapping remain unknown.
 - Fixed-step simulation and resource limits cannot guarantee 60 FPS if game work exceeds the device's frame budget.
 
@@ -47,32 +46,39 @@ Status: IMPLEMENTED ON MAIN, DESKTOP CI PASSED
 Validate archive structure, package version, entry point, paths, integrity, and resource limits. Verify packaging tool and direct runtime loading in Windows/Linux CI. This is format validation, not a Python sandbox. PR #1 merged after all four desktop CI jobs passed.
 
 ### P0: Safe target deployment
-Status: IN PROGRESS
+Status: IN PROGRESS (device facts partly known, see Device facts)
 Do not run desktop setup on the R36S or modify firmware, system Python, system libraries, boot configuration, or frontend. Determine firmware, architecture/ABI, libc, Python, SDL, display, and controller details before proposing deployment. Require a reversible plan.
 
 ### P1: Fixed-step runtime and input edges
-Status: IMPLEMENTED, CI PENDING
-Acceptance: regression tests and desktop CI pass. Verified on eb18298846c86046910b63619a3a405c12dd1cc6.
+Status: IMPLEMENTED, DESKTOP CI PASSED
+Verified on main ae8b8d3 (Runtime checks run 71).
 
 ### P2: Virtual-console and rendering contract
-Status: IMPLEMENTED, CI PENDING
-Acceptance: manifest validation, helper tests, and documentation agree. Verified on eb18298846c86046910b63619a3a405c12dd1cc6.
+Status: IMPLEMENTED, DESKTOP CI PASSED
+Verified on main ae8b8d3 (Runtime checks run 71).
 
 ### P3: Memory and performance budget
 Status: IMPLEMENTED, DESKTOP CI PASSED
 AssetStore limits cover only assets loaded through the API; asset-folder auditing is a coarse guardrail, not a process-memory profiler.
 
 ### P4: R36S hardware validation
-Status: BLOCKED ON DEVICE INFORMATION
+Status: BLOCKED ON PYTHON/PYGAME AVAILABILITY AND OWNER-APPROVED PROBE
 Confirm firmware, CPU architecture, userspace/libc, Python, SDL, and controller mapping. Test launch/exit, scaling, input, frame pacing, asset loading, and performance on actual hardware. Record measurements.
 
 ### P5: Browser preview
-Status: IN PROGRESS
-Keep preview isolated from native runtime. Pages path fix commit: d280b08a04745f0907230be54386ec234b8073be. Verify workflow separately.
+Status: DONE ON MAIN, CI PASSED
+Keep preview isolated from native runtime. Pages path fix d280b08; Web Preview workflow passed on main (run 17).
 
 ### P6: Repository rename
 Status: BLOCKED ON REPOSITORY ADMIN ACTION
 Desired name: R36S-PyGame-Runtime. Rename through GitHub Settings if desired and verify redirects.
+
+## Device facts (R36S, ArkOS)
+Source: owner's launch.log, GitROMs run, CryMon handoff notes, relayed second-hand. Not independently checked by this repo.
+Confirmed: ArkOS with PortMaster (/opt/system/Tools/PortMaster, ports in /roms/ports); kernel Linux 4.4.189 (Oct 13 2021), hostname rg351mp; aarch64; glibc (loader cache lists AArch64 and 32-bit hard-float; version unknown, 2.17+ ran an aarch64 binary); libSDL2-2.0.so.0 present for both ABIs (version unknown); app renders 640x480.
+Unconfirmed (general knowledge/notes): RK3326 SoC; gptokeyb maps pad to keyboard keys (A=z, B=x observed in GitROMs). runtime.py KEY_MAP already maps z->a and x->b, so keyboard-mapped input should work without code changes.
+Unknown: Python and pygame availability and versions, exact glibc/SDL versions, SDL video driver (gitroms.log in the GitROMs data folder records it), real RAM/free disk.
+Next: tools/device_probe.sh is a read-only POSIX shell probe for these unknowns. It installs and writes nothing. Do not run it on the device without explicit owner approval.
 
 ## Known limits
 - Fixed-step simulation and 60 Hz render pacing do not guarantee 60 FPS on hardware that cannot keep up.
@@ -81,6 +87,7 @@ Desired name: R36S-PyGame-Runtime. Rename through GitHub Settings if desired and
 - No R36S deployment or performance test has occurred.
 
 ## Change log
+- 2026-10-11: Recorded relayed R36S device facts, added read-only tools/device_probe.sh (not run on device), refreshed CI status for P1/P2/P5 from GitHub Actions on ae8b8d3, removed duplicate bullet.
 - 2026-10-11: Added `.sgba` version 1 ZIP-compatible game packages, manifest validation, archive/path/size guards, runtime extraction/loading, packaging CLI, regression tests, and documentation. Desktop CI passed after merge; no R36S testing.
 - 2026-10-11: Made AI-owned packaging mandatory: game agents must generate and validate `.sgba` files and include them in deliverables; never ask the user to run terminal commands.
 - 2026-10-11: Added fixed-step simulation, low-resolution profiles, cached/budgeted assets, SpriteSheet, Animation, TileMap, draw_sprite, SceneManager, SaveStore, low-memory AI contract, template manifest, asset audit, benchmark probe, and regression tests. Desktop CI passed on eb18298846c86046910b63619a3a405c12dd1cc6; no R36S testing.
