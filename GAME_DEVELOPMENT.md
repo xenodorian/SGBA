@@ -65,6 +65,8 @@ The runtime exposes small helpers for common 2D game needs:
 
 - AssetStore: cached image/font/sound loading, path confinement, decoded-image budget.
 - SpriteSheet: row-major frames from a single image; supports camera offsets and destination clipping.
+- Animation: compact frame-index animation advanced with simulation time.
+- TileMap: compact integer grid that draws only the camera-visible tile region; tile index -1 is empty.
 - draw_sprite(surface, image, position, camera=(0, 0), clip=None): integer-position blit with optional camera offset and clip rectangle.
 - SceneManager: named scenes with add(), switch(), update(), draw(), and optional event delegation.
 - SaveStore(path): explicit-path JSON save files, capped at 256 KiB. Choose a path that is writable on the target; the runtime does not assume a particular home directory.
