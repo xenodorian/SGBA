@@ -1,14 +1,23 @@
-"""Small shared Pygame runtime for R36S PyGame Runtime."""
+"""Small, resource-conscious Pygame runtime for SGBA / R36S."""
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 import pygame
 
-LOGICAL_SIZE = (640, 480)
+DEFAULT_LOGICAL_SIZE = (640, 480)
+ALLOWED_LOGICAL_SIZES = {(240, 160), (320, 240), (640, 480)}
+SIMULATION_HZ = 60
+FIXED_DT = 1.0 / SIMULATION_HZ
+MAX_CATCH_UP_STEPS = 5
+MAX_FRAME_TIME = 0.25
+DEFAULT_ASSET_BUDGET_MB = 16
+MAX_IMAGE_DIMENSION = 512
+LOGICAL_SIZE = DEFAULT_LOGICAL_SIZE
 ACTIONS = ("up", "down", "left", "right", "a", "b", "x", "y", "start", "select", "guide", "l1", "r1", "l2", "r2", "l3", "r3", "rs_up", "rs_down", "rs_left", "rs_right")
 
 KEY_MAP = {
@@ -24,27 +33,128 @@ KEY_MAP = {
     pygame.K_3: "l2", pygame.K_4: "r2", pygame.K_5: "l3", pygame.K_6: "r3",
     pygame.K_j: "rs_left", pygame.K_l: "rs_right", pygame.K_i: "rs_up", pygame.K_k: "rs_down",
 }
-
-# Common SDL joystick button order. Device-specific mapping may be needed
-# after checking the actual R36S firmware and controller event layout.
 BUTTON_MAP = {
     0: "a", 1: "b", 2: "x", 3: "y", 4: "select", 5: "guide", 6: "start",
     7: "l3", 8: "r3", 9: "l1", 10: "r1",
 }
 
 
-class InputState:
-    """Frame-based input that combines keyboard, buttons, hats, and stick axes."""
+def load_game_config(game_path: Path) -> dict:
+    """Load and validate optional game.json next to a game's entry file."""
+    config = {
+        "logical_size": list(DEFAULT_LOGICAL_SIZE),
+        "asset_budget_mb": DEFAULT_ASSET_BUDGET_MB,
+        "max_image_dimension": MAX_IMAGE_DIMENSION,
+        "target_fps": SIMULATION_HZ,
+    }
+    config_path = game_path.parent / "game.json"
+    if config_path.is_file():
+        try:
+            supplied = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Invalid game manifest {config_path}: {exc}") from exc
+        if not isinstance(supplied, dict):
+            raise RuntimeError("game.json must contain a JSON object")
+        unknown = set(supplied) - set(config)
+        if unknown:
+            raise RuntimeError(f"Unsupported game.json fields: {', '.join(sorted(unknown))}")
+        config.update(supplied)
+    try:
+        size = tuple(int(value) for value in config["logical_size"])
+    except (TypeError, ValueError):
+        raise RuntimeError("logical_size must be a supported [width, height] pair")
+    if size not in ALLOWED_LOGICAL_SIZES:
+        raise RuntimeError(f"logical_size must be one of {sorted(ALLOWED_LOGICAL_SIZES)}")
+    config["logical_size"] = size
+    if config["target_fps"] != SIMULATION_HZ:
+        raise RuntimeError("target_fps is fixed at 60")
+    if not isinstance(config["asset_budget_mb"], int) or not 1 <= config["asset_budget_mb"] <= 32:
+        raise RuntimeError("asset_budget_mb must be an integer from 1 to 32")
+    if not isinstance(config["max_image_dimension"], int) or not 16 <= config["max_image_dimension"] <= 1024:
+        raise RuntimeError("max_image_dimension must be an integer from 16 to 1024")
+    return config
 
+
+class AssetStore:
+    """Per-game asset cache with decoded-image memory and dimension limits."""
+    def __init__(self, game_dir: Path, budget_mb: int = DEFAULT_ASSET_BUDGET_MB,
+                 max_image_dimension: int = MAX_IMAGE_DIMENSION) -> None:
+        self.game_dir = Path(game_dir).resolve()
+        self.budget_bytes = budget_mb * 1024 * 1024
+        self.max_image_dimension = max_image_dimension
+        self._images: dict[Path, pygame.Surface] = {}
+        self._fonts: dict[tuple[str | None, int], pygame.font.Font] = {}
+        self._sounds: dict[Path, pygame.mixer.Sound] = {}
+        self._image_bytes = 0
+
+    def _path(self, relative_path: str | Path) -> Path:
+        path = (self.game_dir / relative_path).resolve()
+        if path != self.game_dir and self.game_dir not in path.parents:
+            raise ValueError("Asset paths must remain inside the game folder")
+        if not path.is_file():
+            raise FileNotFoundError(f"Game asset not found: {path}")
+        return path
+
+    def image(self, relative_path: str | Path, *, alpha: bool = True) -> pygame.Surface:
+        path = self._path(relative_path)
+        if path in self._images:
+            return self._images[path]
+        image = pygame.image.load(str(path))
+        width, height = image.get_size()
+        if max(width, height) > self.max_image_dimension:
+            raise ValueError(f"Image {path.name} is {width}x{height}; limit is {self.max_image_dimension}x{self.max_image_dimension}")
+        if pygame.display.get_surface():
+            image = image.convert_alpha() if alpha else image.convert()
+        else:
+            image = image.copy()
+        estimate = image.get_width() * image.get_height() * max(1, image.get_bytesize())
+        if self._image_bytes + estimate > self.budget_bytes:
+            raise MemoryError(f"Decoded image budget exceeded ({self.budget_bytes // (1024 * 1024)} MiB)")
+        self._images[path] = image
+        self._image_bytes += estimate
+        return image
+
+    def font(self, size: int, relative_path: str | Path | None = None) -> pygame.font.Font:
+        if not 8 <= int(size) <= 96:
+            raise ValueError("Font size must be between 8 and 96")
+        path = str(self._path(relative_path)) if relative_path is not None else None
+        key = (path, int(size))
+        if key not in self._fonts:
+            self._fonts[key] = pygame.font.Font(path, int(size))
+        return self._fonts[key]
+
+    def sound(self, relative_path: str | Path) -> pygame.mixer.Sound | None:
+        """Return a cached sound, or None if optional audio cannot initialize."""
+        path = self._path(relative_path)
+        if path in self._sounds:
+            return self._sounds[path]
+        if not pygame.mixer.get_init():
+            try:
+                pygame.mixer.init()
+            except pygame.error:
+                return None
+        sound = pygame.mixer.Sound(str(path))
+        self._sounds[path] = sound
+        return sound
+
+    @property
+    def image_memory_bytes(self) -> int:
+        return self._image_bytes
+
+
+class InputState:
+    """Source-aware logical input; edges persist until a simulation tick consumes them."""
     def __init__(self) -> None:
-        # Each action tracks its individual physical input sources. An action
-        # remains held until every source contributing to it has been released.
         self._sources: dict[str, set[tuple]] = {action: set() for action in ACTIONS}
         self._pressed: set[str] = set()
         self._released: set[str] = set()
         self._joysticks: dict[int, object] = {}
 
     def begin_frame(self) -> None:
+        # Do not clear edges here: a render frame can occur without a simulation tick.
+        pass
+
+    def consume_edges(self) -> None:
         self._pressed.clear()
         self._released.clear()
 
@@ -55,15 +165,14 @@ class InputState:
             sources.add(source)
         else:
             sources.discard(source)
-        is_down_now = bool(sources)
-        if is_down_now and not was_down:
+        now_down = bool(sources)
+        if now_down and not was_down:
             self._pressed.add(action)
-        elif was_down and not is_down_now:
+        elif was_down and not now_down:
             self._released.add(action)
 
     @staticmethod
     def _instance_id(event: pygame.event.Event) -> int:
-        # Pygame 2 supplies instance_id; joy is retained as a fallback.
         return int(getattr(event, "instance_id", getattr(event, "joy", -1)))
 
     def _remove_joystick_sources(self, instance_id: int) -> None:
@@ -74,11 +183,9 @@ class InputState:
 
     def process(self, event: pygame.event.Event) -> None:
         if event.type == pygame.KEYDOWN and event.key in KEY_MAP:
-            action = KEY_MAP[event.key]
-            self._set(action, ("key", event.key), True)
+            self._set(KEY_MAP[event.key], ("key", event.key), True)
         elif event.type == pygame.KEYUP and event.key in KEY_MAP:
-            action = KEY_MAP[event.key]
-            self._set(action, ("key", event.key), False)
+            self._set(KEY_MAP[event.key], ("key", event.key), False)
         elif event.type == pygame.JOYDEVICEADDED:
             joystick = pygame.joystick.Joystick(event.device_index)
             joystick.init()
@@ -96,10 +203,8 @@ class InputState:
             instance_id = self._instance_id(event)
             hat = getattr(event, "hat", 0)
             x, y = event.value
-            for action, down in (("left", x < 0), ("right", x > 0),
-                                 ("up", y > 0), ("down", y < 0)):
-                source = ("joyhat", instance_id, hat, action)
-                self._set(action, source, down)
+            for action, down in (("left", x < 0), ("right", x > 0), ("up", y > 0), ("down", y < 0)):
+                self._set(action, ("joyhat", instance_id, hat, action), down)
         elif event.type == pygame.JOYAXISMOTION and event.axis in (0, 1, 2, 3, 4, 5):
             instance_id = self._instance_id(event)
             value = event.value
@@ -116,8 +221,7 @@ class InputState:
             else:
                 states = (("r2", value > 0.5),)
             for action, down in states:
-                source = ("joyaxis", instance_id, event.axis, action)
-                self._set(action, source, down)
+                self._set(action, ("joyaxis", instance_id, event.axis, action), down)
 
     def down(self, action: str) -> bool:
         self._validate_action(action)
@@ -154,39 +258,39 @@ def load_game(path: Path):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="R36S PyGame Runtime")
-    parser.add_argument("game", nargs="?", default="games/demo/main.py",
-                        help="Path to a game Python file")
-    parser.add_argument("--fullscreen", action="store_true",
-                        help="Run fullscreen while preserving 4:3 aspect ratio")
+    parser = argparse.ArgumentParser(description="SGBA lightweight Pygame runtime")
+    parser.add_argument("game", nargs="?", default="games/demo/main.py", help="Path to a game Python file")
+    parser.add_argument("--fullscreen", action="store_true", help="Run fullscreen while preserving aspect ratio")
     args = parser.parse_args()
-
     game_path = Path(args.game).resolve()
     if not game_path.is_file():
         parser.error(f"game file not found: {game_path}")
+    try:
+        config = load_game_config(game_path)
+    except RuntimeError as exc:
+        parser.error(str(exc))
 
     pygame.init()
     try:
-        # Initialize already-connected controllers as well as handling hotplug.
         inputs = InputState()
         for device_index in range(pygame.joystick.get_count()):
             joystick = pygame.joystick.Joystick(device_index)
             joystick.init()
             inputs._joysticks[joystick.get_instance_id()] = joystick
-
         flags = pygame.FULLSCREEN if args.fullscreen else 0
-        window_size = (960, 720) if not args.fullscreen else (0, 0)
-        display = pygame.display.set_mode(window_size, flags)
-        pygame.display.set_caption("R36S PyGame Runtime")
-        logical = pygame.Surface(LOGICAL_SIZE)
+        display = pygame.display.set_mode((0, 0) if args.fullscreen else (960, 720), flags)
+        pygame.display.set_caption("SGBA")
+        logical_size = config["logical_size"]
+        logical = pygame.Surface(logical_size, depth=32)
         clock = pygame.time.Clock()
-        running = True
         game = load_game(game_path)
+        update = getattr(game, "update", None)
+        accumulator = 0.0
+        running = True
 
         while running:
             inputs.begin_frame()
-            events = pygame.event.get()
-            for event in events:
+            for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -196,18 +300,26 @@ def main() -> int:
                 if callable(handler):
                     handler(event)
 
-            dt = min(clock.tick(60) / 1000.0, 0.05)
-            update = getattr(game, "update", None)
-            if callable(update):
-                update(dt, inputs)
+            elapsed = min(clock.tick(SIMULATION_HZ) / 1000.0, MAX_FRAME_TIME)
+            accumulator = min(accumulator + elapsed, FIXED_DT * MAX_CATCH_UP_STEPS)
+            first_update = True
+            steps = 0
+            while accumulator >= FIXED_DT and steps < MAX_CATCH_UP_STEPS:
+                if callable(update):
+                    update(FIXED_DT, inputs)
+                if first_update:
+                    inputs.consume_edges()
+                    first_update = False
+                accumulator -= FIXED_DT
+                steps += 1
+            if steps == MAX_CATCH_UP_STEPS and accumulator >= FIXED_DT:
+                accumulator %= FIXED_DT
+
             logical.fill((0, 0, 0))
             game.draw(logical)
-
             display.fill((0, 0, 0))
-            scale = min(display.get_width() / LOGICAL_SIZE[0],
-                        display.get_height() / LOGICAL_SIZE[1])
-            scaled_size = (max(1, round(LOGICAL_SIZE[0] * scale)),
-                           max(1, round(LOGICAL_SIZE[1] * scale)))
+            scale = min(display.get_width() / logical_size[0], display.get_height() / logical_size[1])
+            scaled_size = (max(1, round(logical_size[0] * scale)), max(1, round(logical_size[1] * scale)))
             frame = pygame.transform.scale(logical, scaled_size)
             display.blit(frame, ((display.get_width() - scaled_size[0]) // 2,
                                  (display.get_height() - scaled_size[1]) // 2))
