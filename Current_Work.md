@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-11
 Repository: xenodorian/SGBA
-Latest runtime/performance tooling change before this status update: eb18298846c86046910b63619a3a405c12dd1cc6
+Latest verified runtime/performance code: eb18298846c86046910b63619a3a405c12dd1cc6
 
 ## Handoff protocol
 1. Read this file and inspect source before starting.
@@ -32,7 +32,7 @@ Build a small, predictable Python/Pygame virtual console for AI-generated 2D gam
 
 ## Verification status
 - Automated tests cover manifest profiles, input-edge consumption, AssetStore caching/path/dimension/memory limits, sprite sheets, camera clipping, animation, tilemaps, scenes, and save files. CI also audits asset sizes and benchmarks the demo.
-- GitHub Actions runs for the newest runtime/API and benchmark changes are pending. Linux unit tests passed on commit a05e3289f30e4f630f248118d88b64eca7a3ca5f. The first benchmark attempt exposed a script import-path issue, fixed in eb18298846c86046910b63619a3a405c12dd1cc6; the rerun is pending. Do not mark the implementation verified until the latest run completes successfully.
+- GitHub Actions runs for the newest runtime/API and benchmark changes are pending. GitHub Actions passed on commit eb18298846c86046910b63619a3a405c12dd1cc6 across Ubuntu and Windows with Python 3.11 and 3.12. This includes all 19 unit tests, the asset budget audit, and the demo benchmark. A documentation/handoff follow-up commit is current; its workflow rerun is queued. Do not mark the implementation verified until the latest run completes successfully.
 - No R36S deployment or performance test has occurred. Firmware, architecture, Python/SDL availability, and physical controller mapping remain unknown.
 - Fixed-step simulation and resource limits cannot guarantee 60 FPS if game work exceeds the device's frame budget.
 
@@ -44,14 +44,14 @@ Do not run desktop setup on the R36S or modify firmware, system Python, system l
 
 ### P1: Fixed-step runtime and input edges
 Status: IMPLEMENTED, CI PENDING
-Acceptance: regression tests and desktop CI pass.
+Acceptance: regression tests and desktop CI pass. Verified on eb18298846c86046910b63619a3a405c12dd1cc6.
 
 ### P2: Virtual-console and rendering contract
 Status: IMPLEMENTED, CI PENDING
-Acceptance: manifest validation, helper tests, and documentation agree.
+Acceptance: manifest validation, helper tests, and documentation agree. Verified on eb18298846c86046910b63619a3a405c12dd1cc6.
 
 ### P3: Memory and performance budget
-Status: IMPLEMENTED, CI PENDING
+Status: IMPLEMENTED, DESKTOP CI PASSED
 AssetStore limits cover only assets loaded through the API; asset-folder auditing is a coarse guardrail, not a process-memory profiler.
 
 ### P4: R36S hardware validation
@@ -73,4 +73,4 @@ Desired name: R36S-PyGame-Runtime. Rename through GitHub Settings if desired and
 - No R36S deployment or performance test has occurred.
 
 ## Change log
-- 2026-10-11: Added fixed-step simulation, low-resolution profiles, cached/budgeted assets, SpriteSheet, Animation, TileMap, draw_sprite, SceneManager, SaveStore, low-memory AI contract, template manifest, asset audit, benchmark probe, and regression tests. CI pending.
+- 2026-10-11: Added fixed-step simulation, low-resolution profiles, cached/budgeted assets, SpriteSheet, Animation, TileMap, draw_sprite, SceneManager, SaveStore, low-memory AI contract, template manifest, asset audit, benchmark probe, and regression tests. Desktop CI passed on eb18298846c86046910b63619a3a405c12dd1cc6; no R36S testing.
