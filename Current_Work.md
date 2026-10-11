@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-11
 Repository: xenodorian/SGBA
-Latest runtime/performance tooling change before this status update: f6f2e7bc7998db44491456c4267d5c0dbc428a09
+Latest runtime/performance tooling change before this status update: eb18298846c86046910b63619a3a405c12dd1cc6
 
 ## Handoff protocol
 1. Read this file and inspect source before starting.
@@ -32,7 +32,7 @@ Build a small, predictable Python/Pygame virtual console for AI-generated 2D gam
 
 ## Verification status
 - Automated tests cover manifest profiles, input-edge consumption, AssetStore caching/path/dimension/memory limits, sprite sheets, camera clipping, animation, tilemaps, scenes, and save files. CI also audits asset sizes and benchmarks the demo.
-- GitHub Actions runs for the newest runtime/API and benchmark changes are pending. Linux unit tests passed on commit a05e3289f30e4f630f248118d88b64eca7a3ca5f; Windows jobs and the latest CI benchmark are not yet confirmed. Do not mark the implementation verified until the latest run completes successfully.
+- GitHub Actions runs for the newest runtime/API and benchmark changes are pending. Linux unit tests passed on commit a05e3289f30e4f630f248118d88b64eca7a3ca5f. The first benchmark attempt exposed a script import-path issue, fixed in eb18298846c86046910b63619a3a405c12dd1cc6; the rerun is pending. Do not mark the implementation verified until the latest run completes successfully.
 - No R36S deployment or performance test has occurred. Firmware, architecture, Python/SDL availability, and physical controller mapping remain unknown.
 - Fixed-step simulation and resource limits cannot guarantee 60 FPS if game work exceeds the device's frame budget.
 

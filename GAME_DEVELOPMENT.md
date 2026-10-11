@@ -73,6 +73,10 @@ The runtime exposes small helpers for common 2D game needs:
 
 Keep scenes and saves simple. Store compact game state and references rather than duplicate copies of large assets. SaveStore is not an encryption or anti-cheat system.
 
+## Performance probe
+
+Run `python tools/benchmark_game.py games/my_game/main.py --frames 300` to measure headless update-plus-draw cost. It reports average, 95th-percentile, and maximum time and exits nonzero if the average exceeds its configured budget (16.67 ms by default). This is a development smoke test, not an R36S benchmark; only measurements on the actual device establish target performance.
+
 ## Portability
 
 - Use Python and pinned Pygame only unless another dependency is explicitly approved.
