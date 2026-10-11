@@ -25,6 +25,10 @@ class InputLab:
         self.hat = (0, 0)
         self.last_events = []
         self.seen_controller_event = False
+        self.gradient_a = pygame.Surface((298, 91))
+        self.gradient_b = pygame.Surface((298, 91))
+        self._dither(self.gradient_a, (0, 0, 298, 91), (255, 28, 94), (255, 208, 25))
+        self._dither(self.gradient_b, (0, 0, 298, 91), (0, 230, 255), (73, 48, 255))
 
     def handle_event(self, event):
         if event.type in (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP):
@@ -93,8 +97,8 @@ class InputLab:
         self._text(surface, "640 x 480 LOGICAL FRAME  |  SHARP PIXELS  |  RAW CONTROLLER EVENTS",
                    (17, 36), MUTED, self.small)
 
-        self._dither(surface, (16, 58, 298, 91), (255, 28, 94), (255, 208, 25))
-        self._dither(surface, (326, 58, 298, 91), (0, 230, 255), (73, 48, 255))
+        surface.blit(self.gradient_a, (16, 58))
+        surface.blit(self.gradient_b, (326, 58))
         pygame.draw.rect(surface, WHITE, (16, 58, 298, 91), 1)
         pygame.draw.rect(surface, WHITE, (326, 58, 298, 91), 1)
         self._text(surface, "A / MAGENTA -> AMBER", (22, 62), WHITE, self.small)
@@ -165,7 +169,7 @@ class InputLab:
         self._text(surface, "LAST EVENTS:", (26, 438), MUTED, self.small)
         for i, event_text in enumerate(self.last_events[:3]):
             self._text(surface, event_text, (112 + i * 165, 438), WHITE, self.raw_font)
-        self._text(surface, "KEYBOARD: arrows/WASD move | Z/Space=A | X/Ctrl=B | Q=X | E=Y",
+        self._text(surface, "KEYS: arrows/WASD move | Z/Space=A X/Ctrl=B Q=X E=Y | 1-6 extras | IJKL right stick",
                    (16, 468), MUTED, self.small)
 
 
