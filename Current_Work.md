@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-11
 Repository: xenodorian/SGBA
-Latest verified runtime/performance code: eb18298846c86046910b63619a3a405c12dd1cc6
+Latest verified runtime/package code: 86ac857780da89a177479574a200e79c4961209a
 
 ## Handoff protocol
 1. Read this file and inspect source before starting.
@@ -33,7 +33,7 @@ Build a small, predictable Python/Pygame virtual console for AI-generated 2D gam
 - Browser preview remains a separate proof of concept and does not define native architecture.
 
 ## Verification status
-- `.sgba` implementation is committed on feature branch `feature/sgba-package-format`; desktop CI has not yet verified this feature. The package format does not sandbox Python code. No R36S testing.
+- `.sgba` implementation was merged to `main` in `86ac857780da89a177479574a200e79c4961209a`. Pull-request CI passed on Ubuntu and Windows with Python 3.11 and 3.12, including package tests, asset audit, and demo benchmark. The package format does not sandbox Python code. No R36S testing.
 - Automated tests cover manifest profiles, input-edge consumption, AssetStore caching/path/dimension/memory limits, sprite sheets, camera clipping, animation, tilemaps, scenes, and save files. CI also audits asset sizes and benchmarks the demo.
 - GitHub Actions runs for the newest runtime/API and benchmark changes are pending. GitHub Actions passed on commit eb18298846c86046910b63619a3a405c12dd1cc6 across Ubuntu and Windows with Python 3.11 and 3.12. This includes all 19 unit tests, the asset budget audit, and the demo benchmark. A documentation/handoff follow-up commit is current; its workflow rerun is queued. Do not mark the implementation verified until the latest run completes successfully.
 - No R36S deployment or performance test has occurred. Firmware, architecture, Python/SDL availability, and physical controller mapping remain unknown.
@@ -42,8 +42,8 @@ Build a small, predictable Python/Pygame virtual console for AI-generated 2D gam
 ## Queue
 
 ### P7: `.sgba` game package format
-Status: IMPLEMENTED ON FEATURE BRANCH, CI PENDING
-Validate archive structure, package version, entry point, paths, integrity, and resource limits. Verify packaging tool and direct runtime loading in Windows/Linux CI. This is format validation, not a Python sandbox.
+Status: IMPLEMENTED ON MAIN, DESKTOP CI PASSED
+Validate archive structure, package version, entry point, paths, integrity, and resource limits. Verify packaging tool and direct runtime loading in Windows/Linux CI. This is format validation, not a Python sandbox. PR #1 merged after all four desktop CI jobs passed.
 
 ### P0: Safe target deployment
 Status: IN PROGRESS
