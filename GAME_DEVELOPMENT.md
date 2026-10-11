@@ -1,41 +1,68 @@
-# Game Development Contract
+# SGBA Game Development Contract
 
-Use this contract when creating games for this runtime, including with an AI coding assistant.
+## Fixed virtual console
 
-## Runtime-owned behavior
+- Default logical canvas: **640×480**, preserved for compatibility.
+- Optional profiles: **240×160** for Game Boy-style games and **320×240** for games needing more UI space.
+- Select a profile with an optional game.json beside main.py. Do not resize the logical canvas during play.
+- Simulation updates use a fixed 60 Hz step. The runtime owns the window, event polling, frame pacing, display scaling, and display flip.
+- Coordinates start at top-left; x increases right and y increases down. Prefer integer coordinates for pixel art.
+- Rendering must not advance game state. Keep update logic separate from draw logic.
+- Runtime scaling preserves aspect ratio and uses nearest-neighbor sampling.
 
-- Logical screen: 640×480 pixels.
-- The runtime creates the Pygame window, manages the frame loop, collects input, and scales the logical screen to the display.
-- Do not call `pygame.init()`, `pygame.display.set_mode()`, `pygame.display.flip()`, or run a second event loop inside a game.
-- Do not change the logical resolution or assume the physical display is 640×480.
-- The runtime targets 60 frames per second. `update(dt, inputs)` receives elapsed seconds, capped at 0.05 seconds per frame.
+## Game entry point
 
-## Required game interface
+Each game folder contains main.py defining create_game(), which returns an object with draw(surface) and optional update(dt, inputs) and handle_event(event). The runtime owns the loop and display. Games must not initialize Pygame, create a window, poll the event queue, or create a second loop.
 
-Each game is a Python file that defines `create_game()` and returns an object with:
+Logical actions: up, down, left, right, a, b, x, y, start, select, guide, l1, r1, l2, r2, l3, r3, rs_up, rs_down, rs_left, rs_right. Use inputs.down(action) for held state, inputs.pressed(action) for a press edge, and inputs.released(action) for a release edge. Physical controller mappings are provisional until verified on the actual handheld.
 
-- `draw(surface)`: required; draw the full frame onto the supplied 640×480 surface.
-- `update(dt, inputs)`: optional; update game state. Use `dt` for time-based movement.
-- `handle_event(event)`: optional; receive Pygame events when needed.
+## Folder layout and manifest
 
-Input actions are `up`, `down`, `left`, `right`, `a`, `b`, `x`, `y`, `start`, `select`, `guide`, `l1`, `r1`, `l2`, `r2`, `l3`, `r3`, `rs_up`, `rs_down`, `rs_left`, and `rs_right`. Use `inputs.down(action)` for held input, `inputs.pressed(action)` for a new press, and `inputs.released(action)` for release.
+- games/<game_name>/main.py
+- games/<game_name>/game.json (optional)
+- games/<game_name>/assets/ (optional, committed game assets)
 
-The `games/input_lab/main.py` diagnostic displays high-contrast dithered gradients and shows both mapped logical actions and raw SDL button/axis/hat events. The raw event panel is useful when a target controller uses a different physical-to-SDL mapping.
+Example manifest:
 
-## Portability rules
+    {
+      "logical_size": [240, 160],
+      "asset_budget_mb": 8,
+      "max_image_dimension": 256,
+      "target_fps": 60
+    }
 
-- Use only Python and dependencies explicitly approved for the runtime. Do not add platform-specific APIs or dependencies without discussing them first.
-- Keep game rules and rendering independent of operating system, window size, and controller model.
-- Resolve game assets relative to the game file, not the current working directory. For example: `Path(__file__).resolve().parent / "assets" / "player.png"`.
-- Include all required assets in the game folder. Use relative paths and ordinary filenames.
-- Do not assume internet access, writable system directories, or access to the user's home directory.
-- Avoid large asset files and expensive per-frame work. Load images, sounds, and fonts once during initialization rather than every frame.
-- Keep input mappings in the runtime. Games should ask for logical actions, not inspect physical keyboard keys or controller button numbers.
+Defaults are 640×480, 16 MiB decoded-image budget, 512×512 maximum image dimension, and 60 Hz. Supported logical sizes are 240×160, 320×240, and 640×480. target_fps must remain 60. Asset budget must be 1-32 MiB and image dimension limit 16-1024 pixels.
 
-## Running a game
+## Memory and performance budget
 
-- Windows: `run_windows.bat games/my_game/main.py`
-- Linux desktop: `./run_linux.sh games/my_game/main.py`
-- Add `--fullscreen` to either command for fullscreen mode.
+The target has 1 GiB RAM shared by the operating system, runtime, and game. Never assume all of it is available to the game. Use these conservative defaults:
 
-The template in `games/template/main.py` demonstrates the expected structure. Hardware-specific input and performance still require testing on the target device.
+- Keep the complete assets directory at or below 16 MiB per game unless explicitly approved.
+- Keep decoded images under the manifest budget. Prefer 8 MiB or less for a 240×160 game.
+- Keep images at or below 512×512 by default. Use sprite sheets and tile sheets rather than many full-screen images.
+- Use PNG for pixel art. Avoid video, huge backgrounds, large source art in shipped folders, oversized audio, duplicate assets, and unnecessary fonts.
+- Load assets once at initialization. Cache images, fonts, sounds, transformations, and static text. Never reload or transform assets each frame.
+- Use tilemaps and compact data for rooms, dialogue, inventory, stats, and encounters rather than giant pre-rendered images.
+- Avoid per-frame allocations, full-screen effects, unbounded entities/particles/projectiles, heavyweight physics, expensive pathfinding, networking, subprocesses, threads, and unnecessary packages.
+- Draw only visible map regions; avoid unbounded world-sized surfaces. Cap transient entities and use simple grid-based collision where suitable.
+- 60 Hz is a target, not a guarantee. If a game misses its frame budget, reduce asset sizes, entities, effects, and per-frame work before increasing system requirements.
+
+## Asset API
+
+    from pathlib import Path
+    from runtime import AssetStore
+
+    ASSETS = AssetStore(Path(__file__).resolve().parent / "assets", budget_mb=8,
+                        max_image_dimension=256)
+    player = ASSETS.image("player.png")
+    font = ASSETS.font(16)
+
+AssetStore caches assets, blocks paths escaping its asset folder, and enforces decoded-image limits for images loaded through it. sound() returns None if optional audio cannot initialize; gameplay must not depend on sound. Do not bypass the store with repeated direct asset loads.
+
+## Portability
+
+- Use Python and pinned Pygame only unless another dependency is explicitly approved.
+- Resolve paths from Path(__file__).resolve().parent, never the process working directory.
+- Keep controller details out of game logic.
+- The browser preview is secondary and does not define the native architecture.
+- Do not claim R36S compatibility or performance before actual device testing.
