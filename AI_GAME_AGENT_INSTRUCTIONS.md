@@ -41,7 +41,9 @@ The target has 1 GiB RAM shared with the OS and runtime. Treat memory as scarce.
 - 60 Hz is a target to measure, not a guarantee. Optimize bottlenecks rather than silently lowering simulation frequency.
 
 ## Assets and manifest
-Use games/<name>/main.py, optional game.json, and optional assets/. Resolve paths from Path(__file__).resolve().parent, never the current working directory. Supported manifest fields: logical_size, asset_budget_mb, max_image_dimension, target_fps. Supported sizes are 240×160, 320×240, and 640×480; target_fps is fixed at 60.
+Develop in `games/<name>/main.py`, with optional `game.json`, `assets/`, and sibling Python modules. Resolve paths from `Path(__file__).resolve().parent`, never the current working directory. Supported `game.json` fields: logical_size, asset_budget_mb, max_image_dimension, target_fps. Supported sizes are 240×160, 320×240, and 640×480; target_fps is fixed at 60.
+
+For distribution, create a `.sgba` package with `python tools/package_game.py games/<name>`. The ZIP-compatible package has root `manifest.json`, `main.py`, optional `game.json`, optional `assets/`, and sibling modules. Format version 1 manifest fields are `format: "sgba"`, `format_version: 1`, `title`, and `entry_point`. Do not manually invent alternate package layouts. Package validation does not sandbox Python code.
 
 Example:
 
