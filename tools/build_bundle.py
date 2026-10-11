@@ -181,6 +181,8 @@ def trim_python(python_dir: Path) -> None:
                     "bin/python", "bin/python3", "lib/libpython3.11.so", "lib/libpython3.so"):
         for path in python_dir.glob(pattern):
             path.unlink()
+    for package in (stdlib / "site-packages").glob("*"):   # pip and setuptools are not needed at run time
+        shutil.rmtree(package) if package.is_dir() else package.unlink()
     for name in ("share", "include", "tcl", "Scripts"):
         shutil.rmtree(python_dir / name, ignore_errors=True)
     for cache in python_dir.rglob("__pycache__"):
@@ -224,6 +226,10 @@ def build(target: str, cache: Path, out_dir: Path) -> Path:
         wheel.extractall(site)
     for leftover in site.glob("pygame-*.data"):
         shutil.rmtree(leftover, ignore_errors=True)
+    for unused in ("docs", "tests", "examples", "__pyinstaller"):
+        shutil.rmtree(site / "pygame" / unused, ignore_errors=True)
+    for stub in (site / "pygame").glob("*.pyi"):
+        stub.unlink()
     if "libz_deb" in pins:
         libz = deb_member(download(*pins["libz_deb"], cache), "lib/aarch64-linux-gnu/libz.so.1.")
         (site / "pygame.libs" / "libz.so.1").write_bytes(libz)
