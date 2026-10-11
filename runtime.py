@@ -361,6 +361,52 @@ class InputState:
         self._pressed: set[str] = set()
         self._released: set[str] = set()
         self._joysticks: dict[int, object] = {}
+        self._bound: dict[str, dict] | None = None  # custom pad bindings, see set_bindings
+
+    def set_bindings(self, bindings: dict | None) -> None:
+        """Use custom pad bindings {action: [source, ...]} in place of the default pad map.
+
+        A source is ("button", n), ("hat", index, "up|down|left|right") or
+        ("axis", index, "+" or "-"). None restores the defaults. Keyboard is unaffected.
+        """
+        if bindings is None:
+            self._bound = None
+            return
+        lookup: dict[str, dict] = {"button": {}, "hat": {}, "axis": {}}
+        for action, sources in bindings.items():
+            self._validate_action(action)
+            for source in sources:
+                kind = source[0]
+                if kind not in lookup:
+                    raise ValueError(f"Unknown binding type: {kind}")
+                lookup[kind].setdefault(tuple(source[1:]), set()).add(action)
+        self._bound = lookup
+
+    def _process_bound(self, event: pygame.event.Event) -> bool:
+        """Handle a pad event with custom bindings. Returns True if the event type was pad input."""
+        assert self._bound is not None
+        instance_id = self._instance_id(event)
+        if event.type in (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP):
+            down = event.type == pygame.JOYBUTTONDOWN
+            for action in self._bound["button"].get((event.button,), ()):
+                self._set(action, ("joybutton", instance_id, event.button), down)
+        elif event.type == pygame.JOYHATMOTION:
+            hat = getattr(event, "hat", 0)
+            x, y = event.value
+            states = {"left": x < 0, "right": x > 0, "up": y > 0, "down": y < 0}
+            for (bound_hat, direction), actions in self._bound["hat"].items():
+                if bound_hat == hat:
+                    for action in actions:
+                        self._set(action, ("joyhat", instance_id, hat, direction), states[direction])
+        elif event.type == pygame.JOYAXISMOTION:
+            for (axis, sign), actions in self._bound["axis"].items():
+                if axis == event.axis:
+                    down = event.value > 0.5 if sign == "+" else event.value < -0.5
+                    for action in actions:
+                        self._set(action, ("joyaxis", instance_id, axis, sign), down)
+        else:
+            return False
+        return True
 
     def begin_frame(self) -> None:
         # Do not clear edges here: a render frame can occur without a simulation tick.
@@ -411,6 +457,8 @@ class InputState:
             instance_id = self._instance_id(event)
             self._remove_joystick_sources(instance_id)
             self._joysticks.pop(instance_id, None)
+        elif self._bound is not None and self._process_bound(event):
+            return
         elif event.type in (pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP):
             action = BUTTON_MAP.get(event.button)
             if action is not None:
@@ -477,76 +525,108 @@ def load_game(path: Path):
     return game
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="SGBA lightweight Pygame runtime")
-    parser.add_argument("game", nargs="?", default="games/demo/main.py", help="Path to a .sgba package or a development game .py file")
-    parser.add_argument("--fullscreen", action="store_true", help="Run fullscreen while preserving aspect ratio")
-    args = parser.parse_args()
-    game_title = "SGBA"
-    try:
-        if Path(args.game).suffix.lower() == ".sgba":
-            game_title = validate_package(args.game)["title"]
-        game_path = resolve_game_path(args.game)
-        config = load_game_config(game_path)
-    except (OSError, PackageError, RuntimeError) as exc:
-        parser.error(str(exc))
+def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size: tuple,
+              exit_on_combo: bool = True) -> str:
+    """Run one game or shell scene until it ends. Returns "closed" (window closed) or "done".
 
-    pygame.init()
-    try:
-        inputs = InputState()
-        for device_index in range(pygame.joystick.get_count()):
+    A scene ends when it sets a truthy `finished` attribute, on Esc, or on Start+Select.
+    """
+    update = getattr(game, "update", None)
+    logical = pygame.Surface(logical_size, depth=32)
+    clock = pygame.time.Clock()
+    accumulator = 0.0
+    inputs.consume_edges()  # presses from the previous scene (e.g. Start in Start+Select) must not leak in
+    combo_armed = False  # a held Start+Select from the previous scene must be released first
+    while True:
+        inputs.begin_frame()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return "closed"
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return "done"
+            inputs.process(event)
+            handler = getattr(game, "handle_event", None)
+            if callable(handler):
+                handler(event)
+        combo = inputs.down("start") and inputs.down("select")
+        if not combo:
+            combo_armed = True
+        elif exit_on_combo and combo_armed:
+            return "done"
+
+        elapsed = min(clock.tick(SIMULATION_HZ) / 1000.0, MAX_FRAME_TIME)
+        accumulator = min(accumulator + elapsed, FIXED_DT * MAX_CATCH_UP_STEPS)
+        first_update = True
+        steps = 0
+        while accumulator >= FIXED_DT and steps < MAX_CATCH_UP_STEPS:
+            if callable(update):
+                update(FIXED_DT, inputs)
+            if first_update:
+                inputs.consume_edges()
+                first_update = False
+            accumulator -= FIXED_DT
+            steps += 1
+        if steps == MAX_CATCH_UP_STEPS and accumulator >= FIXED_DT:
+            accumulator %= FIXED_DT
+        if getattr(game, "finished", False):
+            return "done"
+
+        logical.fill((0, 0, 0))
+        game.draw(logical)
+        display.fill((0, 0, 0))
+        scale = min(display.get_width() / logical_size[0], display.get_height() / logical_size[1])
+        scaled_size = (max(1, round(logical_size[0] * scale)), max(1, round(logical_size[1] * scale)))
+        frame = pygame.transform.scale(logical, scaled_size)
+        display.blit(frame, ((display.get_width() - scaled_size[0]) // 2,
+                             (display.get_height() - scaled_size[1]) // 2))
+        pygame.display.flip()
+
+
+def open_joysticks(inputs: "InputState") -> None:
+    for device_index in range(pygame.joystick.get_count()):
+        try:
             joystick = pygame.joystick.Joystick(device_index)
             joystick.init()
             inputs._joysticks[inputs._joystick_id(joystick)] = joystick
+        except pygame.error:
+            continue
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="SGBA lightweight Pygame runtime")
+    parser.add_argument("game", nargs="?", default=None,
+                        help="Path to a .sgba package or a development game .py file. "
+                             "Without it the on-screen game menu starts.")
+    parser.add_argument("--fullscreen", action="store_true", help="Run fullscreen while preserving aspect ratio")
+    args = parser.parse_args()
+    game_title = "SGBA"
+    direct = None
+    if args.game is not None:
+        try:
+            if Path(args.game).suffix.lower() == ".sgba":
+                game_title = validate_package(args.game)["title"]
+            direct = resolve_game_path(args.game)
+            config = load_game_config(direct)
+        except (OSError, PackageError, RuntimeError) as exc:
+            parser.error(str(exc))
+
+    import sgba_shell
+    sgba_shell.log(f"start python {sys.version.split()[0]} pygame {pygame.version.ver}")
+    pygame.init()
+    try:
+        inputs = InputState()
+        open_joysticks(inputs)
+        sgba_shell.apply_saved_controls(inputs)
         flags = pygame.FULLSCREEN if args.fullscreen else 0
         display = pygame.display.set_mode((0, 0) if args.fullscreen else (960, 720), flags)
+        sgba_shell.log(f"video driver {pygame.display.get_driver()} size {display.get_size()} "
+                       f"joysticks {pygame.joystick.get_count()}")
         pygame.display.set_caption(f"SGBA: {game_title}")
-        logical_size = config["logical_size"]
-        logical = pygame.Surface(logical_size, depth=32)
-        clock = pygame.time.Clock()
-        game = load_game(game_path)
-        update = getattr(game, "update", None)
-        accumulator = 0.0
-        running = True
-
-        while running:
-            inputs.begin_frame()
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    running = False
-                inputs.process(event)
-                if inputs.down("start") and inputs.down("select"):
-                    running = False  # Start+Select exits on devices with no Esc key
-                handler = getattr(game, "handle_event", None)
-                if callable(handler):
-                    handler(event)
-
-            elapsed = min(clock.tick(SIMULATION_HZ) / 1000.0, MAX_FRAME_TIME)
-            accumulator = min(accumulator + elapsed, FIXED_DT * MAX_CATCH_UP_STEPS)
-            first_update = True
-            steps = 0
-            while accumulator >= FIXED_DT and steps < MAX_CATCH_UP_STEPS:
-                if callable(update):
-                    update(FIXED_DT, inputs)
-                if first_update:
-                    inputs.consume_edges()
-                    first_update = False
-                accumulator -= FIXED_DT
-                steps += 1
-            if steps == MAX_CATCH_UP_STEPS and accumulator >= FIXED_DT:
-                accumulator %= FIXED_DT
-
-            logical.fill((0, 0, 0))
-            game.draw(logical)
-            display.fill((0, 0, 0))
-            scale = min(display.get_width() / logical_size[0], display.get_height() / logical_size[1])
-            scaled_size = (max(1, round(logical_size[0] * scale)), max(1, round(logical_size[1] * scale)))
-            frame = pygame.transform.scale(logical, scaled_size)
-            display.blit(frame, ((display.get_width() - scaled_size[0]) // 2,
-                                 (display.get_height() - scaled_size[1]) // 2))
-            pygame.display.flip()
+        if direct is not None:
+            game = load_game(direct)
+            run_scene(display, inputs, game, config["logical_size"])
+        else:
+            sgba_shell.shell_main(display, inputs, sys.modules[__name__])
     finally:
         pygame.quit()
     return 0
