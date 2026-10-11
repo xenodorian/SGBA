@@ -8,6 +8,13 @@ This is an early proof of concept, not yet an installable R36S package. The logi
 
 **Do not run the desktop Linux setup script on the R36S.** The handheld's firmware, CPU architecture, system libraries, and available Python version must be confirmed first. The eventual handheld package should be self-contained and must not modify system Python or firmware.
 
+## Agent handoff
+
+- `Current_Work.md`: persistent cross-agent task queue, current status, blockers, and next steps.
+- `AGENTS.md`: repository-level agent entrypoint.
+- `AI_GAME_AGENT_INSTRUCTIONS.md`: normative instructions for AI agents implementing games.
+- `GAME_DEVELOPMENT.md`: concise game API and portability overview.
+
 ## PC setup
 
 Requirements: Python 3.11 or 3.12.
