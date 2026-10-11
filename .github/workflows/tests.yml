@@ -26,3 +26,5 @@ jobs:
         env:
           SDL_VIDEODRIVER: dummy
         run: python -m unittest discover -s tests -v
+      - name: Audit game asset budgets
+        run: python tools/audit_assets.py
