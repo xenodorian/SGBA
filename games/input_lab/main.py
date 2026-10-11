@@ -25,6 +25,7 @@ class InputLab:
         self.hat = (0, 0)
         self.last_events = []
         self.seen_controller_event = False
+        self.input_state = None
         self.gradient_a = pygame.Surface((298, 91))
         self.gradient_b = pygame.Surface((298, 91))
         self._dither(self.gradient_a, (0, 0, 298, 91), (255, 28, 94), (255, 208, 25))
@@ -62,7 +63,10 @@ class InputLab:
         del self.last_events[5:]
 
     def update(self, dt, inputs):
-        pass
+        self.input_state = inputs
+
+    def _down(self, action):
+        return self.input_state.down(action) if self.input_state is not None else False
 
     def _text(self, surface, text, pos, color=WHITE, font=None):
         surface.blit((font or self.font).render(str(text), True, color), pos)
@@ -114,7 +118,7 @@ class InputLab:
         dpad = {"UP": (72, 202, 25, 20, "up"), "LEFT": (45, 224, 25, 20, "left"),
                 "RIGHT": (99, 224, 25, 20, "right"), "DOWN": (72, 246, 25, 20, "down")}
         for label, (x, y, w, h, action) in dpad.items():
-            active = inputs.down(action)
+            active = self._down(action)
             self._lit(surface, (x, y, w, h), active, CYAN)
             self._center(surface, label[0], (x + w // 2, y + h // 2),
                          BG if active else WHITE, self.small)
@@ -122,21 +126,21 @@ class InputLab:
         face = [("Y", 220, 205, "y", YELLOW), ("X", 194, 229, "x", PINK),
                 ("B", 246, 229, "b", ORANGE), ("A", 220, 253, "a", GREEN)]
         for label, x, y, action, color in face:
-            active = inputs.down(action)
+            active = self._down(action)
             pygame.draw.circle(surface, color if active else (36, 43, 65), (x, y), 11)
             pygame.draw.circle(surface, WHITE if active else EDGE, (x, y), 11, 1)
             self._center(surface, label, (x, y), BG if active else color, self.small)
 
         for i, (label, action) in enumerate((("SELECT", "select"), ("START", "start"), ("GUIDE", "guide"))):
             x = 25 + i * 88
-            active = inputs.down(action)
+            active = self._down(action)
             self._lit(surface, (x, 286, 78, 22), active, PINK)
             self._center(surface, label, (x + 39, 297), WHITE, self.small)
 
         for label, action, x in (("L1", "l1", 341), ("R1", "r1", 485),
                                   ("L2", "l2", 341), ("R2", "r2", 485)):
             y = 195 if label in ("L1", "R1") else 224
-            active = inputs.down(action)
+            active = self._down(action)
             self._lit(surface, (x, y, 118, 23), active, PINK if label.endswith("1") else ORANGE)
             self._center(surface, label + (" ACTIVE" if active else ""), (x + 59, y + 12),
                          WHITE, self.small)
@@ -145,7 +149,7 @@ class InputLab:
             (385, 283, "L3 / LEFT STICK", ("l3", "left", "right", "up", "down"), (0, 1)),
             (535, 283, "R3 / RIGHT STICK", ("r3", "rs_left", "rs_right", "rs_up", "rs_down"), (2, 3)),
         ):
-            active = any(inputs.down(a) for a in actions)
+            active = any(self._down(a) for a in actions)
             pygame.draw.circle(surface, (37, 49, 77), (cx, cy), 24)
             pygame.draw.circle(surface, CYAN if active else EDGE, (cx, cy), 24, 2)
             dx = int(self.axes.get(axes[0], 0.0) * 12)
