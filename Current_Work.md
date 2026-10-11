@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-11
 Repository: xenodorian/SGBA
-Latest runtime change before this status update: cb5ee6655cdc2f4a3982a318518e766e50d3ae87
+Latest runtime/performance tooling change before this status update: f6f2e7bc7998db44491456c4267d5c0dbc428a09
 
 ## Handoff protocol
 1. Read this file and inspect source before starting.
@@ -22,6 +22,8 @@ Build a small, predictable Python/Pygame virtual console for AI-generated 2D gam
 - AssetStore caches images, fonts, and sounds; blocks paths outside its asset folder; enforces decoded-image budget and image dimension limits.
 - SpriteSheet provides row-major sprite frames. Animation advances frame indices by simulation time. TileMap stores compact tile indices and draws only the visible camera region. draw_sprite supports camera offsets and clipping.
 - SceneManager provides named scene switching and update/draw/event delegation. SaveStore handles compact JSON saves at an explicit writable path, capped at 256 KiB.
+- tools/benchmark_game.py measures update+draw average, p95, and maximum frame cost; CI benchmarks the demo against the 16.67 ms average budget.
+- SceneManager provides named scene switching and update/draw/event delegation. SaveStore handles compact JSON saves at an explicit writable path, capped at 256 KiB.
 - Starter game opts into 240×160 with an 8 MiB decoded-image budget and 256-pixel maximum image dimension.
 - AI game contract defines conservative RAM, asset, and frame-time budgets for 1 GiB hardware.
 - CI asset audit checks each game's assets directory against a 16 MiB total budget and 4 MiB per-file guardrail.
@@ -29,8 +31,8 @@ Build a small, predictable Python/Pygame virtual console for AI-generated 2D gam
 - Browser preview remains a separate proof of concept and does not define native architecture.
 
 ## Verification status
-- Automated tests cover manifest profiles, input-edge consumption, AssetStore caching/path/dimension/memory limits, sprite sheets, camera clipping, animation, tilemaps, scenes, and save files.
-- GitHub Actions runs for the newest runtime/API changes are pending. Do not mark the implementation verified until the latest run completes successfully.
+- Automated tests cover manifest profiles, input-edge consumption, AssetStore caching/path/dimension/memory limits, sprite sheets, camera clipping, animation, tilemaps, scenes, and save files. CI also audits asset sizes and benchmarks the demo.
+- GitHub Actions runs for the newest runtime/API and benchmark changes are pending. Linux unit tests passed on commit a05e3289f30e4f630f248118d88b64eca7a3ca5f; Windows jobs and the latest CI benchmark are not yet confirmed. Do not mark the implementation verified until the latest run completes successfully.
 - No R36S deployment or performance test has occurred. Firmware, architecture, Python/SDL availability, and physical controller mapping remain unknown.
 - Fixed-step simulation and resource limits cannot guarantee 60 FPS if game work exceeds the device's frame budget.
 
@@ -71,4 +73,4 @@ Desired name: R36S-PyGame-Runtime. Rename through GitHub Settings if desired and
 - No R36S deployment or performance test has occurred.
 
 ## Change log
-- 2026-10-11: Added fixed-step simulation, low-resolution profiles, cached/budgeted assets, SpriteSheet, Animation, TileMap, draw_sprite, SceneManager, SaveStore, low-memory AI contract, template manifest, asset audit, and regression tests. CI pending.
+- 2026-10-11: Added fixed-step simulation, low-resolution profiles, cached/budgeted assets, SpriteSheet, Animation, TileMap, draw_sprite, SceneManager, SaveStore, low-memory AI contract, template manifest, asset audit, benchmark probe, and regression tests. CI pending.
