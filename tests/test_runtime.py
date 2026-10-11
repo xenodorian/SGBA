@@ -126,6 +126,26 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(target.get_at((4, 2))[:3], (0, 255, 0))
         self.assertEqual(target.get_at((12, 2))[:3], (0, 0, 0))
 
+    def test_animation_advances_and_stops(self):
+        animation = runtime.Animation([2, 3, 4], frame_duration=0.1, loop=False)
+        animation.update(0.21)
+        self.assertEqual(animation.frame, 4)
+        self.assertTrue(animation.finished)
+        animation.update(1.0)
+        self.assertEqual(animation.frame, 4)
+
+    def test_tilemap_draws_visible_tiles(self):
+        tiles = pygame.Surface((8, 4), pygame.SRCALPHA)
+        pygame.draw.rect(tiles, (255, 0, 0, 255), (0, 0, 4, 4))
+        pygame.draw.rect(tiles, (0, 255, 0, 255), (4, 0, 4, 4))
+        sheet = runtime.SpriteSheet(tiles, (4, 4))
+        tilemap = runtime.TileMap([[0, 1, -1], [1, 0, 1]], sheet)
+        target = pygame.Surface((8, 8))
+        tilemap.draw(target, camera=(0, 0))
+        self.assertEqual(target.get_at((1, 1))[:3], (255, 0, 0))
+        self.assertEqual(target.get_at((5, 1))[:3], (0, 255, 0))
+        self.assertEqual(target.get_at((1, 5))[:3], (0, 255, 0))
+
     def test_scene_manager_switches_and_delegates(self):
         class Scene:
             def __init__(self, color):
