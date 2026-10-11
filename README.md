@@ -1,54 +1,35 @@
-# R36S PyGame Runtime
+# SGBA
 
-A small, cross-platform Python/Pygame runtime for 2D games. The goal is to run the same game code on a Windows development PC and the R36S handheld.
+A small, resource-conscious Python/Pygame runtime for 2D games. The goal is to use the same game code on a Windows development PC and the future R36S handheld.
 
 ## Current status
 
-This is an early proof of concept, not yet an installable R36S package. The logical game display is 640×480. The runtime provides a common game API, keyboard/gamepad actions, and aspect-preserving display scaling.
+The native runtime uses a fixed 60 Hz simulation loop, a default 640×480 logical canvas, optional 240×160 and 320×240 low-resolution profiles, source-aware logical input, nearest-neighbor scaling, and cached asset loading with decoded-image limits.
 
-**Do not run the desktop Linux setup script on the R36S.** The handheld's firmware, CPU architecture, system libraries, and available Python version must be confirmed first. The eventual handheld package should be self-contained and must not modify system Python or firmware.
+The R36S has 1 GiB RAM shared with the operating system and running software. Memory and frame time are design constraints. The runtime cannot guarantee 60 FPS on untested hardware or against an unbounded game; generated games must follow the resource contract in GAME_DEVELOPMENT.md.
+
+**Do not run the desktop Linux setup script on the R36S.** Firmware, CPU architecture, system libraries, Python, SDL support, and controller layout must be confirmed first. Do not modify the system installation or firmware.
 
 ## Agent handoff
-
-- `Current_Work.md`: persistent cross-agent task queue, current status, blockers, and next steps.
-- `AGENTS.md`: repository-level agent entrypoint.
-- `AI_GAME_AGENT_INSTRUCTIONS.md`: normative instructions for AI agents implementing games.
-- `GAME_DEVELOPMENT.md`: concise game API and portability overview.
+- Current_Work.md: persistent task queue and status.
+- AGENTS.md: repository-level agent entrypoint.
+- AI_GAME_AGENT_INSTRUCTIONS.md: binding AI game-coding instructions.
+- GAME_DEVELOPMENT.md: API, virtual-console profiles, and resource budgets.
 
 ## PC setup
-
 Requirements: Python 3.11 or 3.12.
 
-- Windows: run `setup_windows.bat`, then `run_windows.bat`.
-- Linux desktop: run `sh setup_linux_pc.sh`, then `./run_linux.sh`.
+- Windows: run setup_windows.bat, then run_windows.bat.
+- Linux desktop: run sh setup_linux_pc.sh, then ./run_linux.sh.
 
-Setup creates a project-local `.venv` and installs the pinned Pygame dependency there. It does not install Python packages globally. If setup fails, stop and inspect the error instead of installing system packages.
+Setup creates a project-local .venv and does not install packages globally. If setup fails, inspect the error instead of installing system packages. Run checks using test_windows.bat or ./test_linux.sh.
 
-To run automated checks after setup:
-
-- Windows: `test_windows.bat`
-- Linux desktop: `./test_linux.sh`
-
-To launch fullscreen, pass `--fullscreen` to the launcher. To launch a specific game, pass its Python file path, for example `run_windows.bat games/my_game/main.py` or `./run_linux.sh games/my_game/main.py`. Without a path, the demo starts.
+To launch fullscreen, pass --fullscreen. To launch a specific game, pass its path, for example run_windows.bat games/my_game/main.py or ./run_linux.sh games/my_game/main.py. Without a path, the demo starts.
 
 ## Game API
+Each game exports create_game(), returning an object with required draw(surface) and optional update(dt, inputs) and handle_event(event). Runtime owns display setup, event polling, fixed-step updates, scaling, and display flip. update() runs at 60 Hz with dt == 1/60. Input provides down(action), pressed(action), and released(action).
 
-A game file exports `create_game()`, returning an object with:
+Optional game.json selects logical size 240×160, 320×240, or 640×480. The default remains 640×480. See GAME_DEVELOPMENT.md for the complete contract. games/template is the starter pattern; games/input_lab diagnoses generic SDL input. R36S mapping remains unverified.
 
-- `handle_event(event)`: optional; receives Pygame events.
-- `update(dt, inputs)`: optional; called each frame. `dt` is elapsed seconds.
-- `draw(surface)`: required; draws to a 640×480 Pygame surface.
-
-The shared input object exposes `down(action)`, `pressed(action)`, and `released(action)`. Actions: `up`, `down`, `left`, `right`, `a`, `b`, `x`, `y`, `start`, `select`, `guide`, `l1`, `r1`, `l2`, `r2`, `l3`, `r3`, `rs_up`, `rs_down`, `rs_left`, `rs_right`.
-
-Keyboard defaults: arrows/WASD for directions, Z/Space for A, X/Left Ctrl for B, Q for X, E for Y, Enter for Start, and Backspace for Select. Extended keyboard test bindings: `1/2` = L1/R1, `3/4` = L2/R2, `5/6` = L3/R3, `I/J/K/L` = right stick. Standard SDL button/axis indices are provisional until tested on the target hardware. Launch `run_windows.bat games/input_lab/main.py` (or the equivalent Linux launcher) to inspect raw button indices 0-15, axes 0-5, hat values, recent events, and mapped states.
-
-## Input diagnostic game
-
-Run `games/input_lab/main.py` to display 2x2 dithered color ramps and a live input panel. It logs raw SDL button, axis, and hat events as well as mapped logical actions, making unknown controller layouts diagnosable without assuming R36S-specific indices.
-
-## Compatibility plan
-
-PC and handheld should use the same runtime version and game API. Platform-specific packaging, display scaling, and controller adapters may differ, but game rules and logical rendering should remain consistent. The next handheld step is identifying its firmware and CPU architecture, then testing a reversible, self-contained package without touching the system installation.
-
-See [Game Development Contract](GAME_DEVELOPMENT.md) for rules intended to keep AI-generated games portable. A starter file is available at `games/template/main.py`.
+## Browser preview
+The optional web_preview/ build is a separate proof of concept. Native Python/Pygame remains the source architecture; browser preview success is not evidence of R36S compatibility.
