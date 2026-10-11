@@ -59,6 +59,18 @@ The target has 1 GiB RAM shared by the operating system, runtime, and game. Neve
 
 AssetStore caches assets, blocks paths escaping its asset folder, and enforces decoded-image limits for images loaded through it. sound() returns None if optional audio cannot initialize; gameplay must not depend on sound. Do not bypass the store with repeated direct asset loads.
 
+## Shared lightweight helpers
+
+The runtime exposes small helpers for common 2D game needs:
+
+- AssetStore: cached image/font/sound loading, path confinement, decoded-image budget.
+- SpriteSheet: row-major frames from a single image; supports camera offsets and destination clipping.
+- draw_sprite(surface, image, position, camera=(0, 0), clip=None): integer-position blit with optional camera offset and clip rectangle.
+- SceneManager: named scenes with add(), switch(), update(), draw(), and optional event delegation.
+- SaveStore(path): explicit-path JSON save files, capped at 256 KiB. Choose a path that is writable on the target; the runtime does not assume a particular home directory.
+
+Keep scenes and saves simple. Store compact game state and references rather than duplicate copies of large assets. SaveStore is not an encryption or anti-cheat system.
+
 ## Portability
 
 - Use Python and pinned Pygame only unless another dependency is explicitly approved.
