@@ -47,6 +47,8 @@ jobs:
   # Self-contained bundles: nothing needs to be installed on the target device or PC.
   bundle-arkos-aarch64:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -70,6 +72,18 @@ jobs:
         with:
           name: SGBA-arkos-aarch64
           path: dist/SGBA-arkos-aarch64.zip
+      # GitROMs (the R36S downloader) reads the latest release, because Actions
+      # artifacts need a login. Pre-releases are ignored by releases/latest, so
+      # this must stay a normal release.
+      - name: Publish ArkOS bundle to the rolling "latest" release
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view latest >/dev/null 2>&1 || gh release create latest \
+            --title "Latest build" --notes "Rolling build, replaced on every publish." \
+            --target "$GITHUB_SHA" --latest
+          gh release upload latest dist/SGBA-arkos-aarch64.zip --clobber
 
   bundle-windows-x64:
     runs-on: windows-latest
