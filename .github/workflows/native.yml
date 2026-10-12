@@ -1,0 +1,35 @@
+name: Native runtime
+
+on:
+  push:
+    paths: ["native/**", "sgba_js_shim.js", "tools/build_native_bundle.py", ".github/workflows/native.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install zig (pinned, packaged compiler)
+        run: python -m pip install ziglang==0.17.0
+      - name: Build and smoke-test the development build
+        run: |
+          make -C native
+          native/build/x86_64/sgba native/tests/smoke --frames 30 --shot /tmp/smoke.png
+          test -s /tmp/smoke.png
+      - name: Build the R36S binary (glibc 2.17)
+        run: |
+          make -C native TARGET=aarch64
+          # nothing newer than glibc 2.17 may be required
+          if objdump -T native/build/aarch64/sgba | grep -o 'GLIBC_[0-9.]*' | sort -uV | grep -v -E '^GLIBC_2\.([0-9]|1[0-7])$'; then exit 1; fi
+      - name: Build the Windows binary
+        run: make -C native TARGET=windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sgba-native
+          path: |
+            native/build/aarch64/sgba
+            native/build/windows/sgba.exe

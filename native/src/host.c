@@ -1,4 +1,13 @@
 /* The JavaScript host: one QuickJS context running the page, the shim and the game. */
+#ifdef _WIN32
+#include <string.h>
+static const char *strcasestr(const char *h, const char *n) {          /* not in the Windows C library */
+    size_t m = strlen(n);
+    if (!m) return h;
+    for (; *h; h++) if (!_strnicmp(h, n, m)) return h;
+    return NULL;
+}
+#endif
 #include <ctype.h>
 #include <string.h>
 #include "sgba.h"

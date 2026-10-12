@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>smoke</title></head>
+<body><canvas id="c" width="640" height="480"></canvas>
+<script>
+const ctx = document.getElementById('c').getContext('2d');
+let t = 0;
+function frame() {
+  ctx.fillStyle = '#204060'; ctx.fillRect(0, 0, 640, 480);
+  ctx.fillStyle = '#f0b44c'; ctx.fillRect(40 + (t++ % 200), 100, 80, 80);
+  ctx.fillStyle = '#ffffff'; ctx.font = '24px sans-serif'; ctx.fillText('SGBA smoke test', 40, 300);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script></body></html>

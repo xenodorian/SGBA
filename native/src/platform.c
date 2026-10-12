@@ -1,7 +1,10 @@
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 #ifdef _WIN32
 #include <windows.h>
+#undef CreateWindow
+#undef CreateThread
 #define LIB_OPEN(p) ((void *)LoadLibraryA(p))
 #define LIB_SYM(h, n) ((void *)GetProcAddress((HMODULE)(h), n))
 #else
@@ -27,6 +30,8 @@ int sdl_load(const char *hint_dir) {
         "libSDL2-2.0.so.0", "libSDL2.so", NULL
 #endif
     };
+    const char *forced = getenv("SGBA_SDL");                 /* the launcher can point at the SDL it ships, when the system one fails */
+    if (forced && *forced) g_lib = LIB_OPEN(forced);
     for (int i = 0; names[i] && !g_lib; i++) {
         if (hint_dir) { snprintf(path, sizeof path, "%s/%s", hint_dir, names[i]); g_lib = LIB_OPEN(path); }
         if (!g_lib) g_lib = LIB_OPEN(names[i]);

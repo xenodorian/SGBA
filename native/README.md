@@ -3,7 +3,9 @@
 A C program that runs a web game folder (index.html plus its scripts) without Python.
 
     make                       # build/x86_64/sgba (development, tests)
-    make TARGET=aarch64        # build/aarch64/sgba (R36S / ArkOS), needs aarch64-linux-gnu-gcc
+    make TARGET=aarch64        # build/aarch64/sgba (R36S / ArkOS), glibc 2.17; needs zig: pip install ziglang
+    make TARGET=windows        # build/windows/sgba.exe (needs zig)
+    python ../tools/build_native_bundle.py arkos-aarch64 --web GAME --name "Name"   # self-contained folder + zip in ../dist
 
     sgba GAME_FOLDER           # window, pad and sound
     sgba                       # launcher: lists game folders under ./games

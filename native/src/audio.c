@@ -6,6 +6,9 @@
  */
 #include <math.h>
 #include <stdatomic.h>
+#ifdef _WIN32
+#include <process.h>
+#endif
 #include "stb_vorbis.c"
 #include "natives.h"
 #include "platform.h"
@@ -239,7 +242,11 @@ static int audio_init(Audio *a) {
     a->dev = sdl.OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (!a->dev) { sg_log("warn", "audio unavailable, running silent: %s", sdl.GetError()); return 0; }
     sdl.PauseAudioDevice(a->dev, 0);
+#ifdef _WIN32       /* SDL on Windows wants the caller's thread start functions */
+    a->thread = sdl.CreateThread(decode_thread, "sgba-audio", a, (pfnSDL_CurrentBeginThread)_beginthreadex, (pfnSDL_CurrentEndThread)_endthreadex);
+#else
     a->thread = sdl.CreateThread(decode_thread, "sgba-audio", a);
+#endif
     a->ready = 1;
     return 1;
 }

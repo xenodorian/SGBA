@@ -157,3 +157,11 @@ The plan and checklist are in `NATIVE_TODO.md`. Entries below are dated notes as
 - Result: game scenes 0.02% to 0.13% of pixels differ (HUD and label text, a few pixels on rotating coins); title scene 2.7% (menu text). Tolerance is 3% per scene.
 - Fixes found by the comparison: headless step now follows the game's fps (30), thick lines use pygame's algorithm (crate crosses), text metrics (height, ascent, advances, descender line heights) now come from pygame's own tables (tools/gen_font_metrics.py -> native/src/fontmetrics.h) so menus lay out the same, engine navigation only forces focus in "engine" mode.
 - Still different on purpose: glyph shapes (stb_truetype against hinted SDL_ttf, pygame text looks slightly bolder), 16-bit colour of the menu panel in the Python runtime.
+
+2026-10-12: native runtime, B3 done (R36S build baseline and packaging)
+- Release builds use zig as the C compiler (pip install ziglang, pinned in CI): `make TARGET=aarch64` links against glibc 2.17 (objdump shows only GLIBC_2.17 symbols; ArkOS 2 is glibc 2.30) and `make TARGET=windows` makes sgba.exe, no separate toolchains. Windows fixes found by that build: SDL_CreateThread takes the caller's thread start functions, CreateWindow macro clash, SDL_MAIN_HANDLED, strcasestr and setenv shims.
+- tools/build_native_bundle.py builds the bundle like the Python one: Parry Perry folder + sgba_ui.json, controls.json (R36S mapping), the launcher script (device SDL first, retries with the shipped libSDL2-sgba.so, same as before) or .bat, README, zip. SDL2 is taken from the pinned, checksummed pygame wheel. Parry Perry R36S bundle: 23.4 MB zip (python bundle for comparison is larger).
+- .github/workflows/native.yml builds all three targets, smoke-tests the PC build and rejects any glibc symbol newer than 2.17.
+- Checked: aarch64 binary under QEMU gives a byte-identical screenshot to the x86_64 build; the full bundle starts under QEMU with the shipped SDL and draws the title.
+- NOT checked: nothing has run on the real R36S yet (video driver, pad, sound, real speed), and sgba.exe has not been run (no Windows or wine here; it links and the code paths are the same as Linux apart from LoadLibrary and the thread call).
+- Next: owner test of the native bundle on the R36S; C1/C2 (retire Python) only on the owner's word. Later game tasks: D1, D2.

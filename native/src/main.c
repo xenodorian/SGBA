@@ -1,4 +1,8 @@
 /* sgba: run a web game folder (index.html and its scripts) on the native runtime. */
+#ifdef _WIN32
+#include <stdlib.h>
+#define setenv(k, v, o) _putenv_s((k), (v))
+#endif
 #include <string.h>
 #include <sys/stat.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
