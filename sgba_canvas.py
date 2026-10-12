@@ -15,10 +15,13 @@ from __future__ import annotations
 import json
 import math
 import re
+from collections import OrderedDict
 
 import pygame
 
 from sgba_gfx import LRUBytes, fade
+
+IMAGE_ID_BASE = 1_000_000          # ids at or above this are loaded images, below are canvases (same value as sgba_js)
 
 def mult_ready(tile):
     """Bake per-pixel alpha into an opaque tile so BLEND_RGB_MULT honors it (c' = 255 - (255 - c) * a)."""
@@ -125,7 +128,7 @@ class Canvas2D:
     def __init__(self, host, canvas_id: int, surface: pygame.Surface, retained: bool = False) -> None:
         self.host = host
         self.id = canvas_id
-        self.surface = surface
+        self.surface = surface            # (property: also caches the bounds rectangle)
         self.retained = retained
         self.opaque = surface.get_bytesize() != 4 or not (surface.get_flags() & pygame.SRCALPHA)
         self.version = 0
@@ -135,6 +138,8 @@ class Canvas2D:
         self.pending: list = []           # ops recorded this frame (retained canvases)
         self.prev: list | None = None     # last frame's ops when it was a full repaint
         self.persistent = False           # True once retained drawing is unsafe for this canvas
+        self.groups: OrderedDict = OrderedDict()    # recorded display lists the page asked to reuse (see group_begin)
+        self._grp = None
 
     @staticmethod
     def _fresh_state() -> dict:
@@ -158,18 +163,28 @@ class Canvas2D:
         self.stale = None
 
     @property
+    def surface(self) -> pygame.Surface:
+        return self._surface
+
+    @surface.setter
+    def surface(self, value: pygame.Surface) -> None:
+        self._surface = value
+        self._bounds = value.get_rect()
+
+    @property
     def rect(self) -> pygame.Rect:
-        return self.surface.get_rect()
+        return self._bounds.copy()
 
     # ------------------------------------------------------------ recording
     def emit(self, sig, box: pygame.Rect, fn, covers: bool = False) -> None:
         clip = self.s["clip"]
         if clip is not None:
             box = box.clip(clip)
-        box = box.clip(self.rect)
+            sig = sig + (tuple(clip),)
+        box = box.clip(self._bounds)
         if box.w <= 0 or box.h <= 0:
             return
-        op = Op(sig + (None if clip is None else tuple(clip),), box, fn, covers, clip)
+        op = Op(sig, box, fn, covers, clip)
         if self.retained and not self.persistent:
             self.pending.append(op)
             self.host.stats.ops += 1
@@ -339,6 +354,46 @@ class Canvas2D:
             Canvas2D._cover_cache[key] = known
         return known
 
+    # ------------------------------------------------------------ display lists
+    GROUP_LIMIT = 600            # recorded groups kept
+    GROUP_MAX_OPS = 400          # a group longer than this is not worth keeping
+
+    def group_begin(self, key) -> int:
+        """The page is about to draw something that depends only on `key` and the current drawing state.
+        If the same group was recorded before, its ops are appended now and the page skips drawing it (1).
+        Otherwise recording starts and the page draws it as usual, then calls group_end (0).
+        2 means the group is not tracked (nested in another group, or this canvas is not retained): just draw it."""
+        if not self.retained or self.persistent or self._grp is not None:
+            return 2
+        s = self.s
+        clip = s["clip"]
+        sig = (key, s["m"], s["alpha"], s["comp"], s["fill"], s["stroke"], s["lw"], s["font"], s["align"], s["baseline"],
+               None if clip is None else tuple(clip))
+        ops = self.groups.get(sig)
+        if ops is not None:
+            self.groups.move_to_end(sig)
+            self.pending.extend(ops)
+            self.host.stats.ops += len(ops)
+            return 1
+        self._grp = (sig, len(self.pending))
+        return 0
+
+    def group_end(self) -> None:
+        grp, self._grp = self._grp, None
+        if grp is None or self.persistent or not self.retained:
+            return
+        sig, start = grp
+        ops = self.pending[start:]
+        if not ops or len(ops) > self.GROUP_MAX_OPS:
+            return
+        for op in ops:        # a picture taken from another canvas can change without the op noticing: do not keep those
+            kind = op.sig[0]
+            if (kind == "I" or kind == "R" or kind == "H") and op.sig[1] < IMAGE_ID_BASE:
+                return
+        self.groups[sig] = ops
+        if len(self.groups) > self.GROUP_LIMIT:
+            self.groups.popitem(last=False)
+
     # ------------------------------------------------------------ state
     def set_prop(self, name: str, value) -> None:
         s = self.s
@@ -428,7 +483,44 @@ class Canvas2D:
 
     # ------------------------------------------------------------ rectangles
     def m_fillRect(self, x, y, w, h) -> None:
-        style = self.s["fill"]
+        s = self.s
+        style = s["fill"]
+        m = s["m"]
+        if m[1] == 0.0 and m[2] == 0.0 and s["comp"] == "source-over" and style[0] != "grad":
+            # the common case, kept short: a plain solid rectangle
+            alpha = int(style[3] * s["alpha"])
+            if alpha <= 0:
+                return
+            ma, md, me, mf = m[0], m[3], m[4], m[5]
+            x0 = round(ma * x + me)
+            x1 = round(ma * (x + w) + me)
+            y0 = round(md * y + mf)
+            y1 = round(md * (y + h) + mf)
+            if x1 < x0:
+                x0, x1 = x1, x0
+            if y1 < y0:
+                y0, y1 = y1, y0
+            x1 -= x0
+            y1 -= y0
+            if x1 <= 0 or y1 <= 0:
+                return
+            rect = pygame.Rect(x0, y0, x1, y1)
+            r, g, b = style[0], style[1], style[2]
+            if alpha >= 255:
+                color = (r, g, b)
+
+                def draw_fill(surface, rect=rect, color=color):
+                    surface.fill(color, rect)
+                    return "fill"
+                self.emit(("F", (x0, y0, x1, y1), r, g, b, 255, 0), rect, draw_fill, True)
+            else:
+                host = self.host
+
+                def draw_tile(surface, rect=rect, rgba=(r, g, b, alpha)):
+                    surface.blit(host.solid_tile(rect.size, rgba), rect.topleft)
+                    return "alpha"
+                self.emit(("F", (x0, y0, x1, y1), r, g, b, alpha, 0), rect, draw_tile)
+            return
         if self._axis_aligned():
             rect = self._device_rect(x, y, w, h)
             self._paint(rect, style)
@@ -644,6 +736,55 @@ class Canvas2D:
     def m_drawImage(self, src_id, *a) -> None:
         host = self.host
         src_id = int(src_id)
+        st = self.s
+        m = st["m"]
+        n = len(a)
+        if src_id >= IMAGE_ID_BASE and (n == 8 or n == 2) and m[1] == 0.0 and m[2] == 0.0 and st["comp"] == "source-over":
+            # the common case, kept short: a whole-pixel crop of an image drawn upright, no edge adjustments needed
+            e = host.images.entries.get(src_id)
+            if e is None:
+                return
+            bw, bh = e["w"], e["h"]
+            if n == 8:
+                sx, sy, sw, sh, dx, dy, dw, dh = a
+            else:
+                sx, sy, sw, sh = 0, 0, bw, bh
+                dx, dy = a
+                dw, dh = bw, bh
+            if (type(sx) is int and type(sy) is int and type(sw) is int and type(sh) is int and sx >= 0 and sy >= 0
+                    and 0 < sw and 0 < sh and sx + sw <= bw and sy + sh <= bh and dw != 0 and dh != 0):
+                ma, md, me, mf = m[0], m[3], m[4], m[5]
+                x0 = ma * dx + me
+                x1 = ma * (dx + dw) + me
+                y0 = md * dy + mf
+                y1 = md * (dy + dh) + mf
+                flip_x = x1 < x0
+                flip_y = y1 < y0
+                left = round(x1 if flip_x else x0)
+                top = round(y1 if flip_y else y0)
+                width = round(abs(x1 - x0))
+                height = round(abs(y1 - y0))
+                if width < 1:
+                    width = 1
+                if height < 1:
+                    height = 1
+                alpha = int(st["alpha"] * 255)
+                kind = e["kind"] or "key"
+                box = pygame.Rect(left, top, width, height)
+
+                def draw_fast(surface, src_id=src_id, sx=sx, sy=sy, sw=sw, sh=sh, left=left, top=top, width=width, height=height,
+                              flip_x=flip_x, flip_y=flip_y, alpha=alpha, kind=kind):
+                    image = host.source_surface(src_id)
+                    if image is None:
+                        return None
+                    if width == sw and height == sh and not flip_x and not flip_y and alpha >= 255:
+                        surface.blit(image, (left, top), pygame.Rect(sx, sy, sw, sh))
+                    else:
+                        surface.blit(host.variant(src_id, image, (sx, sy, sw, sh), (width, height), flip_x, flip_y, alpha), (left, top))
+                    return "alpha" if (alpha < 255 or kind == "alpha") else kind
+                self.emit(("I", src_id, 0, sx, sy, sw, sh, left, top, width, height, flip_x, flip_y, alpha, 0), box, draw_fast,
+                          kind == "opaque" and alpha >= 255)
+                return
         size = host.source_size(src_id)
         if size is None:
             return

@@ -37,6 +37,9 @@ def prepare(bundle_zip: Path, workdir: Path) -> Path:
     if not (app / "python" / "bin").is_dir():
         raise SystemExit(f"{bundle_zip} does not look like an ArkOS bundle (no sgba/python)")
     shutil.copy2(HERE / "js_bench.py", app / "js_bench.py")
+    for name in ("runtime.py", "sgba_package.py", "sgba_shell.py", "sgba_js.py", "sgba_js_ui.py", "sgba_js_shim.js",
+                 "sgba_canvas.py", "sgba_gfx.py", "sgba_audio.py"):      # always the engine in this checkout, so no rebuild is needed
+        shutil.copy2(HERE.parent / name, app / name)
     return app
 
 

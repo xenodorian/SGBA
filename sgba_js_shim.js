@@ -361,7 +361,7 @@
   const styleToNative = (v) => (v instanceof CanvasGradient ? JSON.stringify({ g: v.kind, a: v.args, s: v.stops }) : String(v));
 
   class Context2D {
-    constructor(canvas) { this.canvas = canvas; this.__id = canvas.__id; }
+    constructor(canvas) { this.canvas = canvas; this.__id = canvas.__id; this.__st = {}; this.__stack = []; }
   }
   const setters = ['fillStyle', 'strokeStyle', 'globalAlpha', 'lineWidth', 'font', 'textAlign', 'textBaseline',
     'globalCompositeOperation', 'imageSmoothingEnabled', 'lineCap', 'lineJoin', 'miterLimit', 'shadowBlur', 'shadowColor',
@@ -370,22 +370,62 @@
     textBaseline: 'alphabetic', globalCompositeOperation: 'source-over', imageSmoothingEnabled: true, lineCap: 'butt', lineJoin: 'miter',
     miterLimit: 10, shadowBlur: 0, shadowColor: 'rgba(0,0,0,0)', shadowOffsetX: 0, shadowOffsetY: 0, filter: 'none', direction: 'ltr',
     lineDashOffset: 0, imageSmoothingQuality: 'low' };
+  // The context keeps its own copy of the drawing state (and the save/restore stack) so that setting a property to the value it
+  // already has costs nothing: games set fillStyle before every rectangle.
+  const gradientCache = new WeakMap();
+  const nativeStyle = (v) => {
+    if (!(v instanceof CanvasGradient)) return String(v);
+    let t = gradientCache.get(v);
+    if (t === undefined || t[0] !== v.stops.length) { t = [v.stops.length, JSON.stringify({ g: v.kind, a: v.args, s: v.stops })]; gradientCache.set(v, t); }
+    return t[1];
+  };
   for (const name of setters) {
+    const isStyle = name === 'fillStyle' || name === 'strokeStyle';
     Object.defineProperty(Context2D.prototype, name, {
-      get() { const v = this.__p ? this.__p[name] : undefined; return v === undefined ? defaults[name] : v; },
-      set(v) { (this.__p = this.__p || {})[name] = v; __py_set(this.__id, name, name === 'fillStyle' || name === 'strokeStyle' ? styleToNative(v) : v); },
+      get() { const v = this.__st[name]; return v === undefined ? defaults[name] : v; },
+      set(v) {
+        const st = this.__st;
+        if (st[name] === v && !(v instanceof CanvasGradient)) return;
+        st[name] = v;
+        __py_set(this.__id, name, isStyle ? nativeStyle(v) : v);
+      },
     });
   }
-  const direct = ['fillRect', 'strokeRect', 'clearRect', 'beginPath', 'closePath', 'moveTo', 'lineTo', 'rect', 'arc', 'ellipse', 'arcTo',
-    'quadraticCurveTo', 'bezierCurveTo', 'fill', 'stroke', 'clip', 'save', 'restore', 'translate', 'rotate', 'scale', 'setTransform',
-    'transform', 'resetTransform', 'fillText', 'strokeText', 'setLineDash'];
-  for (const name of direct) {
+  Context2D.prototype.__reset = function () { this.__st = {}; this.__stack = []; __py_reset_state(this.__id); };
+  const generic = ['closePath', 'arc', 'ellipse', 'arcTo', 'quadraticCurveTo', 'bezierCurveTo', 'fill', 'stroke', 'clip',
+    'rotate', 'transform', 'resetTransform', 'fillText', 'strokeText', 'setLineDash', 'setTransform'];
+  for (const name of generic) {
     Context2D.prototype[name] = function (...a) { return __py_call(this.__id, name, ...a); };
   }
-  Context2D.prototype.drawImage = function (img, ...a) {
+  // the hot calls get fixed argument lists, each straight to its own native function
+  Context2D.prototype.fillRect = function (x, y, w, h) { return __py_fillRect(this.__id, x, y, w, h); };
+  Context2D.prototype.strokeRect = function (x, y, w, h) { return __py_strokeRect(this.__id, x, y, w, h); };
+  Context2D.prototype.clearRect = function (x, y, w, h) { return __py_clearRect(this.__id, x, y, w, h); };
+  Context2D.prototype.rect = function (x, y, w, h) { return __py_rect(this.__id, x, y, w, h); };
+  Context2D.prototype.moveTo = function (x, y) { return __py_moveTo(this.__id, x, y); };
+  Context2D.prototype.lineTo = function (x, y) { return __py_lineTo(this.__id, x, y); };
+  Context2D.prototype.translate = function (x, y) { return __py_translate(this.__id, x, y); };
+  Context2D.prototype.scale = function (x, y) { return __py_scale(this.__id, x, y); };
+  Context2D.prototype.beginPath = function () { return __py_beginPath(this.__id); };
+  Context2D.prototype.save = function () { this.__stack.push(Object.assign({}, this.__st)); return __py_save(this.__id); };
+  Context2D.prototype.restore = function () { if (this.__stack.length) this.__st = this.__stack.pop(); return __py_restore(this.__id); };
+  // group(key, draw): draw something that depends only on `key` (and the drawing state). SGBA records what it draws once and
+  // replays that list on later frames with the same key, without running `draw` again. Browsers just run `draw`.
+  Context2D.prototype.__group = function (key, draw) {
+    const r = __py_group_begin(this.__id, key);
+    if (r === 1) return;
+    if (r === 2) { draw(); return; }
+    this.save();
+    try { draw(); } finally { this.restore(); __py_group_end(this.__id); }
+  };
+  Context2D.prototype.drawImage = function (img, a, b, c, d, e, f, h, i) {
     const src = img && img.__id !== undefined ? img.__id : -1;
     if (src < 0) return;
-    return __py_call(this.__id, 'drawImage', src, ...a);
+    switch (arguments.length) {
+      case 3: return __py_drawImage(this.__id, src, a, b);
+      case 5: return __py_drawImage(this.__id, src, a, b, c, d);
+      case 9: return __py_drawImage(this.__id, src, a, b, c, d, e, f, h, i);
+    }
   };
   Context2D.prototype.createLinearGradient = (...a) => new CanvasGradient('linear', a);
   Context2D.prototype.createRadialGradient = (...a) => new CanvasGradient('radial', a);
@@ -412,8 +452,8 @@
       super('canvas'); this.__id = canvasSeq++; this._w = 300; this._h = 150; this.__ctx = null;
       __py_new_canvas(this.__id, this._w, this._h);
     }
-    get width() { return this._w; } set width(v) { this._w = v | 0; __py_resize(this.__id, this._w, this._h); }
-    get height() { return this._h; } set height(v) { this._h = v | 0; __py_resize(this.__id, this._w, this._h); }
+    get width() { return this._w; } set width(v) { this._w = v | 0; __py_resize(this.__id, this._w, this._h); if (this.__ctx) this.__ctx.__reset(); }
+    get height() { return this._h; } set height(v) { this._h = v | 0; __py_resize(this.__id, this._w, this._h); if (this.__ctx) this.__ctx.__reset(); }
     setAttribute(k, v) {
       super.setAttribute(k, v); const n = parseInt(v, 10); const key = String(k).toLowerCase();
       if (key === 'width' && n > 0) this.width = n; else if (key === 'height' && n > 0) this.height = n;

@@ -121,6 +121,8 @@ class JSHost:
         add("__py_resize", self._resize_canvas)
         add("__py_set", lambda cid, name, value: self.canvases[int(cid)].set_prop(str(name), value))
         add("__py_call", self._call)
+        add("__py_reset_state", lambda cid: self.canvases[int(cid)].reset_state())
+        self._register_canvas_calls(add)
         add("__py_measure", lambda cid, text: self.canvases[int(cid)].measure(str(text)))
         add("__py_getimage", lambda cid, x, y, w, h: self.canvases[int(cid)].get_image_hex(int(x), int(y), int(w), int(h)))
         add("__py_putimage", lambda cid, x, y, w, h, s: self.canvases[int(cid)].put_image_hex(int(x), int(y), int(w), int(h), str(s)))
@@ -154,6 +156,7 @@ class JSHost:
             canvas.prev = None
             canvas.pending = []
             canvas.stale = None
+            canvas.groups.clear()
             self.first_frame = True
         else:
             canvas.surface = pygame.Surface((w, h), pygame.SRCALPHA)
@@ -162,6 +165,94 @@ class JSHost:
 
     def _opaque_surface(self, size) -> pygame.Surface:
         return pygame.Surface(size, 0, 16 if self.depth == 16 else 32)
+
+    _CANVAS_ERRORS = (pygame.error, ValueError, TypeError, IndexError, ZeroDivisionError, KeyError, OverflowError, AttributeError)
+
+    def _canvas_error(self, name, exc) -> None:
+        self.errors += 1
+        if self.errors < 30:
+            self.log_fn("error", f"canvas {name} failed: {type(exc).__name__}: {exc}")
+
+    def _register_canvas_calls(self, add) -> None:
+        """Fixed-argument entry points for the hot drawing calls: no name lookup, no argument packing."""
+        canvases, errors, fail = self.canvases, self._CANVAS_ERRORS, self._canvas_error
+
+        def fill_rect(cid, x, y, w, h):
+            try:
+                canvases[cid].m_fillRect(x, y, w, h)
+            except errors as exc:
+                fail("fillRect", exc)
+
+        def stroke_rect(cid, x, y, w, h):
+            try:
+                canvases[cid].m_strokeRect(x, y, w, h)
+            except errors as exc:
+                fail("strokeRect", exc)
+
+        def clear_rect(cid, x, y, w, h):
+            try:
+                canvases[cid].m_clearRect(x, y, w, h)
+            except errors as exc:
+                fail("clearRect", exc)
+
+        def rect(cid, x, y, w, h):
+            try:
+                canvases[cid].m_rect(x, y, w, h)
+            except errors as exc:
+                fail("rect", exc)
+
+        def move_to(cid, x, y):
+            try:
+                canvases[cid].m_moveTo(x, y)
+            except errors as exc:
+                fail("moveTo", exc)
+
+        def line_to(cid, x, y):
+            try:
+                canvases[cid].m_lineTo(x, y)
+            except errors as exc:
+                fail("lineTo", exc)
+
+        def translate(cid, x, y):
+            try:
+                canvases[cid].m_translate(x, y)
+            except errors as exc:
+                fail("translate", exc)
+
+        def scale(cid, x, y):
+            try:
+                canvases[cid].m_scale(x, y)
+            except errors as exc:
+                fail("scale", exc)
+
+        def begin_path(cid):
+            canvases[cid].path = []
+
+        def save(cid):
+            canvases[cid].m_save()
+
+        def restore(cid):
+            canvases[cid].m_restore()
+
+        def group_begin(cid, key):
+            return canvases[cid].group_begin(str(key))
+
+        def group_end(cid):
+            canvases[cid].group_end()
+
+        add("__py_group_begin", group_begin)
+        add("__py_group_end", group_end)
+
+        def draw_image(cid, src, *a):
+            try:
+                canvases[cid].m_drawImage(src, *a)
+            except errors as exc:
+                fail("drawImage", exc)
+
+        for name, fn in (("fillRect", fill_rect), ("strokeRect", stroke_rect), ("clearRect", clear_rect), ("rect", rect),
+                         ("moveTo", move_to), ("lineTo", line_to), ("translate", translate), ("scale", scale),
+                         ("beginPath", begin_path), ("save", save), ("restore", restore), ("drawImage", draw_image)):
+            add("__py_" + name, fn)
 
     def _call(self, cid, name, *args):
         try:
