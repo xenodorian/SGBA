@@ -18,7 +18,7 @@ import re
 
 import pygame
 
-from sgba_gfx import LRUBytes
+from sgba_gfx import LRUBytes, fade
 
 COMPOSITE_FLAGS = {"lighter": pygame.BLEND_RGB_ADD, "multiply": pygame.BLEND_RGB_MULT}
 MAX_DIRTY_RECTS = 6
@@ -433,10 +433,7 @@ class Canvas2D:
             alpha = self.s["alpha"]
 
             def draw_gradient(surface, rect=rect, style=style, alpha=alpha, flags=flags):
-                tile = host.gradient_tile(rect.size, rect.topleft, style)
-                if alpha < 1.0:
-                    tile = tile.copy()
-                    tile.set_alpha(int(alpha * 255))
+                tile = host.gradient_tile(rect.size, rect.topleft, style, alpha)
                 surface.blit(tile, rect.topleft, special_flags=flags)
                 return "alpha"
             self.emit(("G", tuple(rect), style, alpha, flags), rect, draw_gradient)
@@ -762,7 +759,7 @@ class Canvas2D:
 def _rotate(host, src_id, image, rect, target, mirrored, qangle, alpha):
     piece = pygame.transform.rotate(host.variant(src_id, image, rect, target, False, mirrored), -qangle)
     if alpha < 255:
-        piece.set_alpha(alpha)
+        piece = fade(piece, alpha)
     return piece
 
 

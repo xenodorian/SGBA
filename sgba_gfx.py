@@ -41,6 +41,16 @@ class Stats:
         self.skipped = 0       # frames that needed no drawing at all
 
 
+def fade(surface: pygame.Surface, alpha: int) -> pygame.Surface:
+    """A copy whose opacity is baked into its pixels. Blitting a surface that has both per-pixel alpha and a separate
+    surface alpha is several times slower than blitting one with the fade already applied."""
+    faded = surface.convert_alpha()
+    if faded is surface:
+        faded = surface.copy()
+    faded.fill((255, 255, 255, max(0, min(255, alpha))), special_flags=pygame.BLEND_RGBA_MULT)
+    return faded
+
+
 class LRUBytes:
     """Least-recently-used cache limited by total bytes."""
 

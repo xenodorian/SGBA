@@ -25,7 +25,7 @@ import pygame
 import sgba_audio
 import sgba_js_ui
 from sgba_canvas import Canvas2D, gradient_surface
-from sgba_gfx import ImageStore, LRUBytes, Stats
+from sgba_gfx import ImageStore, LRUBytes, Stats, fade
 
 try:
     import quickjs
@@ -215,8 +215,7 @@ class JSHost:
                 if flip_x or flip_y:
                     piece = pygame.transform.flip(piece, flip_x, flip_y)
             if alpha < 255:
-                piece = piece.copy()
-                piece.set_alpha(alpha)
+                piece = fade(piece, alpha)
             elif piece.get_colorkey() is None and image.get_colorkey() is not None:
                 piece.set_colorkey(image.get_colorkey())
             piece = self.variants.put(key, piece)
@@ -235,7 +234,7 @@ class JSHost:
         if image is None:
             image = self.font(*font_key).render(text, True, rgb)
             if alpha < 255:
-                image.set_alpha(alpha)
+                image = fade(image, alpha)
             image = self.texts.put(key, image)
         return image
 
@@ -248,7 +247,7 @@ class JSHost:
             image = gradient_surface(mask.get_size(), tuple(origin), style).convert_alpha()
             image.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
             if alpha < 255:
-                image.set_alpha(alpha)
+                image = fade(image, alpha)
             image = self.tiles.put(key, image)
         return image
 
@@ -261,11 +260,15 @@ class JSHost:
             tile = self.tiles.put(key, tile)
         return tile
 
-    def gradient_tile(self, size, origin, style) -> pygame.Surface:
-        key = ("grad", tuple(size), tuple(origin), style)
+    def gradient_tile(self, size, origin, style, alpha: float = 1.0) -> pygame.Surface:
+        level = int(round(alpha * 255)) >> 3 << 3
+        key = ("grad", tuple(size), tuple(origin), style, level)
         tile = self.tiles.get(key)
         if tile is None:
-            tile = self.tiles.put(key, gradient_surface(tuple(size), tuple(origin), style))
+            tile = gradient_surface(tuple(size), tuple(origin), style).convert_alpha()
+            if level < 248:
+                tile = fade(tile, level or 8)
+            tile = self.tiles.put(key, tile)
         return tile
 
     def font(self, size: int, bold: bool, italic: bool) -> pygame.font.Font:

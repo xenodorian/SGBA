@@ -66,6 +66,9 @@ def main() -> int:
     parser.add_argument("--rle", action="store_true")
     parser.add_argument("--budget", type=int, help="override image_budget_mb")
     parser.add_argument("--shot", type=Path)
+    parser.add_argument("--js", action="append", default=[], help="FRAME=CODE: run JavaScript in the page at that frame (repeatable)")
+    parser.add_argument("--json", type=Path, help="write the summary as JSON")
+    parser.add_argument("--skip", type=int, default=0, help="leave out the first N frames from the statistics")
     args = parser.parse_args()
     pygame.init()
     pygame.display.set_mode((640, 480))
@@ -81,22 +84,32 @@ def main() -> int:
         overrides["image_budget_mb"] = args.budget
     original = sgba_js.JSGame._load_config
     sgba_js.JSGame._load_config = staticmethod(lambda root: dict(original(root), **overrides))
-    game = sgba_js.JSGame(args.root, save_dir=Path("/tmp/js_bench_saves"), log=lambda *a: None)
+    game = sgba_js.JSGame(args.root, save_dir=Path(__import__("tempfile").mkdtemp()), log=lambda *a: None)
     game.config["navigation"] = args.nav
     inputs = runtime.InputState()
     surface = pygame.Surface(game.logical_size, 0, game.surface_depth)
     by_frame = parse_script(args.script, args.frames)
     times = []
+    js_at: dict = {}
+    for item in args.js:
+        at, _, code = item.partition("=")
+        js_at.setdefault(int(at), []).append(code)
     for frame in range(args.frames):
+        for code in js_at.get(frame, []):
+            try:
+                game.host.ctx.eval(code)
+            except Exception as exc:  # noqa: BLE001
+                print(f"js at frame {frame} failed: {exc}")
         for action, down in by_frame.get(frame, []):
             inputs._set(action, ("bench",), down)
-        t = time.perf_counter()
+        t = time.process_time()
         game.update(1 / 60, inputs)
         inputs.consume_edges()
         game.draw(surface)
-        times.append((time.perf_counter() - t) * 1000)
+        times.append((time.process_time() - t) * 1000)
     if args.shot:
         pygame.image.save(surface, str(args.shot))
+    times = times[args.skip:] or times
     ordered = sorted(times)
     print(f"frames {len(times)}  avg {statistics.mean(times):.2f} ms  p95 {ordered[int(len(ordered) * .95)]:.2f} ms  "
           f"p99 {ordered[int(len(ordered) * .99)]:.2f} ms  max {ordered[-1]:.2f} ms")
@@ -113,6 +126,15 @@ def main() -> int:
     print(f"per frame: {st.ops / n:.0f} ops, {st.replayed / n:.0f} replayed, skipped {st.skipped}/{st.frames} frames, "
           f"{st.blits / n:.0f} blits (copy {st.copy_px / n / 1e3:.0f}k px, key {st.key_px / n / 1e3:.0f}k, alpha {st.alpha_px / n / 1e3:.0f}k), "
           f"fills {st.fill_px / n / 1e3:.0f}k px, dirty {st.dirty_px / n / 1e3:.0f}k px")
+    if args.json:
+        import json
+        args.json.write_text(json.dumps({
+            "avg_ms": round(statistics.mean(times), 2), "p95_ms": round(ordered[int(len(ordered) * .95)], 2),
+            "p99_ms": round(ordered[int(len(ordered) * .99)], 2), "max_ms": round(ordered[-1], 1),
+            "rss_mb": round(rss_mb()), "decoded_mb": round(store.bytes / 1e6, 1), "images_used": store.decoded_count,
+            "loads": store.loads, "evictions": store.evictions, "js_errors": host.errors,
+            "alpha_kpx": round(st.alpha_px / n / 1e3), "key_kpx": round(st.key_px / n / 1e3),
+            "copy_kpx": round(st.copy_px / n / 1e3), "fill_kpx": round(st.fill_px / n / 1e3), "ops": round(st.ops / n)}))
     return 0
 
 
