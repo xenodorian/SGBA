@@ -197,6 +197,7 @@ void natives_register(Host *h, JSContext *ctx) {
     REG("__py_stat", n_stat, 1);
 #undef REG
     JS_FreeValue(ctx, g);
+    shell_register(ctx);
     canvas_register(h, n, ctx);
     images_register(h, n, ctx);
     audio_register(h, n, ctx);

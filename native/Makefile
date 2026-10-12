@@ -18,7 +18,7 @@ endif
 CFLAGS := -O2 -g -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -I$(ROOT)/src -I$(ROOT)/vendor/quickjs -I$(ROOT)/vendor/sdl2 -I$(ROOT)/vendor/stb
 QJS_CFLAGS := -O2 -D_GNU_SOURCE -w
 SRC := $(wildcard $(ROOT)/src/*.c)
-OBJ := $(patsubst $(ROOT)/src/%.c,$(OUT)/%.o,$(SRC)) $(OUT)/shim_data.o $(OUT)/font_data.o
+OBJ := $(patsubst $(ROOT)/src/%.c,$(OUT)/%.o,$(SRC)) $(OUT)/shim_data.o $(OUT)/font_data.o $(OUT)/shell_data.o
 QJS := $(addprefix $(OUT)/qjs_,quickjs.o libregexp.o libunicode.o dtoa.o)
 SHIM := $(ROOT)/../sgba_js_shim.js
 
@@ -40,6 +40,12 @@ $(OUT)/font_data.c: $(ROOT)/data/freesansbold.ttf $(OUT)/embed
 	$(OUT)/embed $< font_ttf > $@
 
 $(OUT)/font_data.o: $(OUT)/font_data.c
+	$(CC) $(QJS_CFLAGS) -c -o $@ $<
+
+$(OUT)/shell_data.c: $(ROOT)/shell/shell.html $(OUT)/embed
+	$(OUT)/embed $< shell_html > $@
+
+$(OUT)/shell_data.o: $(OUT)/shell_data.c
 	$(CC) $(QJS_CFLAGS) -c -o $@ $<
 
 $(OUT)/qjs_%.o: $(ROOT)/vendor/quickjs/%.c | $(OUT)

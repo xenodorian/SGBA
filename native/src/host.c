@@ -15,6 +15,7 @@ struct Host {
     int errors;
     JSValue fn_tick, fn_key, fn_pads, fn_load_html;
     char *pads_json;
+    Config cfg;
     Natives nat;
 };
 
@@ -24,6 +25,7 @@ int host_error_count(Host *h) { return h->errors; }
 double host_clock_ms(Host *h) { return h->clock_ms; }
 void host_note_error(Host *h) { h->errors++; }
 Natives *host_natives(Host *h) { return &h->nat; }
+const Config *host_config(Host *h) { return &h->cfg; }
 
 static void report_exception(Host *h, const char *what) {
     JSValue ex = JS_GetException(h->ctx);
@@ -63,6 +65,7 @@ int host_eval_int(Host *h, const char *code, int fallback) {
 Host *host_create(const char *root, const char *save_path) {
     Host *h = calloc(1, sizeof *h);
     h->root = strdup(root);
+    config_load(root, &h->cfg);
     h->rt = JS_NewRuntime();
     JS_SetMemoryLimit(h->rt, 96u * 1024 * 1024);
     JS_SetMaxStackSize(h->rt, 2u * 1024 * 1024);
@@ -91,6 +94,7 @@ void host_destroy(Host *h) {
     JS_FreeContext(h->ctx);
     JS_FreeRuntime(h->rt);
     free(h->pads_json);
+    config_free(&h->cfg);
     free(h->root);
     free(h);
 }
@@ -148,13 +152,8 @@ static int scan_scripts(const char *html, Script **out) {
     return n;
 }
 
-int host_load_page(Host *h, const char *index) {
-    char *path = sg_resolve(h->root, index);
-    if (!path) { sg_log("error", "cannot find %s in %s", index, h->root); return -1; }
-    size_t len;
-    char *html = (char *)sg_read_file(path, &len);
-    free(path);
-    if (!html) return -1;
+int host_load_html_text(Host *h, const char *html) {
+    size_t len = strlen(html);
     JSValue arg = JS_NewStringLen(h->ctx, html, len);
     JSValue r = JS_Call(h->ctx, h->fn_load_html, JS_UNDEFINED, 1, &arg);
     if (JS_IsException(r)) report_exception(h, "load html"); else JS_FreeValue(h->ctx, r);
@@ -187,10 +186,22 @@ int host_load_page(Host *h, const char *index) {
         free(s->inline_code);
     }
     free(scripts);
-    free(html);
     host_eval(h, "document.dispatchEvent(new Event('DOMContentLoaded')); window.dispatchEvent(new Event('DOMContentLoaded'));", "DOMContentLoaded");
     host_eval(h, "document.dispatchEvent(new Event('load')); window.dispatchEvent(new Event('load'));", "load");
+    if (h->cfg.npreload) images_preload_patterns(&h->nat, h->root, h->cfg.preload, h->cfg.npreload);
     return 0;
+}
+
+int host_load_page(Host *h, const char *index) {
+    char *path = sg_resolve(h->root, index);
+    if (!path) { sg_log("error", "cannot find %s in %s", index, h->root); return -1; }
+    size_t len;
+    char *html = (char *)sg_read_file(path, &len);
+    free(path);
+    if (!html) return -1;
+    int rc = host_load_html_text(h, html);
+    free(html);
+    return rc;
 }
 
 void host_tick(Host *h, double dt) {

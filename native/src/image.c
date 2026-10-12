@@ -121,6 +121,19 @@ const Surf *image_surface(Natives *n, int id, int *kind) {
     return e->surf;
 }
 
+/* decode the images whose path (relative to the game folder) matches a pattern from sgba_ui.json "preload" */
+void images_preload_patterns(Natives *n, const char *root, char **patterns, int np) {
+    struct ImageStore *s = n->images;
+    size_t rl = strlen(root);
+    for (int i = 0; i < s->count; i++) {
+        Image *e = &s->e[i];
+        if (!e->path || strncmp(e->path, root, rl)) continue;
+        const char *rel = e->path + rl;
+        while (*rel == '/') rel++;
+        for (int k = 0; k < np; k++) if (sg_glob(patterns[k], rel)) { image_surface(n, IMAGE_ID_BASE + i, NULL); break; }
+    }
+}
+
 int image_size(Natives *n, int id, int *w, int *h) {
     struct ImageStore *s = n->images;
     int i = id - IMAGE_ID_BASE;
@@ -232,7 +245,7 @@ void images_preload_step(Natives *n) {
 
 void images_register(Host *h, Natives *n, JSContext *ctx) {
     (void)h;
-    if (!n->images) n->images = imagestore_create(96u * 1024 * 1024, 0);
+    if (!n->images) { const Config *cfg = host_config(h); n->images = imagestore_create((size_t)cfg->image_budget_mb * 1024 * 1024, cfg->alpha_keep); }
     JSValue g = JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, g, "__py_load_image", JS_NewCFunction(ctx, n_load_image, "__py_load_image", 1));
     JS_SetPropertyStr(ctx, g, "__py_preload", JS_NewCFunction(ctx, n_preload, "__py_preload", 1));

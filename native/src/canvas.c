@@ -338,14 +338,18 @@ static void run_op(Natives *n, Canvas *c, const Op *o, const IRect *region) {
         IRect rect = irect(o->i[0], o->i[1], o->i[2], o->i[3]);
         IRect r = irect_clip(rect, clip);
         int lvl = o->i[4];
+        const Gradient *g = o->grad;
+        int vertical = g->linear && fabs(g->a[3] - g->a[1]) >= fabs(g->a[2] - g->a[0]);     /* colour depends only on the row */
+        int horizontal = g->linear && !vertical;
         for (int y = r.y; y < r.y + r.h; y++) {
             uint32_t *row = d->px + (size_t)y * d->w;
+            uint32_t rowc = vertical ? grad_at(g, rect.x, rect.y, rect.w, rect.h, rect.x, y) : 0;
             for (int x = r.x; x < r.x + r.w; x++) {
-                uint32_t gc = grad_at(o->grad, rect.x, rect.y, rect.w, rect.h, x, y);
+                uint32_t gc = vertical ? rowc : grad_at(g, rect.x, rect.y, rect.w, rect.h, x, y);
+                (void)horizontal;
                 int a = PA(gc) * lvl / 255;
                 if (!a) continue;
-                uint32_t src = (gc & 0x00FFFFFFu) | ((uint32_t)a << 24);
-                row[x] = r_comp_px(src, row[x], o->comp);
+                row[x] = r_comp_px((gc & 0x00FFFFFFu) | ((uint32_t)a << 24), row[x], o->comp);
             }
         }
         break;
@@ -953,6 +957,8 @@ int canvas_take_dirty(Natives *n, IRect *out, int max, const Surf **surface) {
     if (first) { first = 0; out[0] = full; count = 1; }
     return count;
 }
+
+void canvas_force_full(Natives *n) { Canvas *c = cv_get(n, n->main_id); if (c) c->force_full = 1; }
 
 int canvas_main_size(Natives *n, int *w, int *h) {
     Canvas *c = cv_get(n, n->main_id);

@@ -40,16 +40,23 @@ void r_fill_solid(Surf *d, IRect r, uint32_t c) {
     }
 }
 
+/* s over an opaque d with source alpha a (1..254): two colour lanes at a time, exact /255 rounding. */
+static inline uint32_t blend_opaque(uint32_t s, uint32_t d, uint32_t a) {
+    uint32_t inv = 255 - a;
+    uint32_t rb = (d & 0x00FF00FFu) * inv + (s & 0x00FF00FFu) * a + 0x00800080u;
+    rb = ((rb + ((rb >> 8) & 0x00FF00FFu)) >> 8) & 0x00FF00FFu;
+    uint32_t g = ((d >> 8) & 0xFFu) * inv + ((s >> 8) & 0xFFu) * a + 0x80u;
+    g = ((g + (g >> 8)) >> 8) & 0xFFu;
+    return 0xFF000000u | rb | (g << 8);
+}
+
 /* One pixel: s over d (straight alpha). */
 static inline uint32_t over(uint32_t s, uint32_t d, int a /* source alpha 0..255 */) {
     if (a <= 0) return d;
     int da = PA(d);
     if (da == 255) {
-        if (a >= 255) return RGBA(PR(s), PG(s), PB(s), 255);
-        int r = ((PR(s) - PR(d)) * a) / 255 + PR(d);
-        int g = ((PG(s) - PG(d)) * a) / 255 + PG(d);
-        int b = ((PB(s) - PB(d)) * a) / 255 + PB(d);
-        return RGBA(r, g, b, 255);
+        if (a >= 255) return s | 0xFF000000u;
+        return blend_opaque(s, d, (uint32_t)a);
     }
     if (da == 0) return RGBA(PR(s), PG(s), PB(s), a);
     int oa = a + da * (255 - a) / 255;
@@ -91,10 +98,52 @@ uint32_t r_comp_px(uint32_t s, uint32_t d, int comp) {
 }
 
 void r_fill_blend(Surf *d, IRect r, uint32_t c, int comp) {
+    if (comp == COMP_OVER) {
+        uint32_t a = c >> 24;
+        if (a == 0) return;
+        for (int y = r.y; y < r.y + r.h; y++) {
+            uint32_t *row = d->px + (size_t)y * d->w + r.x;
+            for (int x = 0; x < r.w; x++) { uint32_t p = row[x]; row[x] = (p >> 24) == 255 ? (a == 255 ? c | 0xFF000000u : blend_opaque(c, p, a)) : over(c, p, (int)a); }
+        }
+        return;
+    }
     for (int y = r.y; y < r.y + r.h; y++) {
         uint32_t *row = d->px + (size_t)y * d->w + r.x;
         for (int x = 0; x < r.w; x++) row[x] = r_comp_px(c, row[x], comp);
     }
+}
+
+/* Fast paths for the common case: a one-to-one copy of a crop with the normal "over" mode. */
+static int blit_plain(Surf *d, const Surf *src, int sx, int sy, int dx, int dy, IRect dest, int alpha, int kind) {
+    int ox = dest.x - dx, oy = dest.y - dy;                       /* offset of the first written pixel inside the crop */
+    for (int y = 0; y < dest.h; y++) {
+        const uint32_t *sp = src->px + (size_t)(sy + oy + y) * src->w + sx + ox;
+        uint32_t *dp = d->px + (size_t)(dest.y + y) * d->w + dest.x;
+        int n = dest.w;
+        if (alpha >= 255) {
+            if (kind == KIND_OPAQUE) memcpy(dp, sp, (size_t)n * 4);
+            else if (kind == KIND_KEY) { for (int x = 0; x < n; x++) { uint32_t p = sp[x]; if (p >> 24) dp[x] = p; } }
+            else {
+                for (int x = 0; x < n; x++) {
+                    uint32_t p = sp[x];
+                    int a = (int)(p >> 24);
+                    if (a == 0) continue;
+                    if (a == 255) { dp[x] = p; continue; }
+                    dp[x] = r_comp_px(p, dp[x], COMP_OVER);
+                }
+            }
+        } else {
+            for (int x = 0; x < n; x++) {
+                uint32_t p = sp[x];
+                int a = kind == KIND_OPAQUE ? 255 : (int)(p >> 24);
+                if (kind == KIND_KEY && a) a = 255;
+                a = a * alpha / 255;
+                if (!a) continue;
+                dp[x] = r_comp_px((p & 0x00FFFFFFu) | ((uint32_t)a << 24), dp[x], COMP_OVER);
+            }
+        }
+    }
+    return 1;
 }
 
 void r_blit(Surf *d, const Surf *src, int sx, int sy, int sw, int sh, int dx, int dy, int dw, int dh, int flip_x, int flip_y,
@@ -104,21 +153,25 @@ void r_blit(Surf *d, const Surf *src, int sx, int sy, int sw, int sh, int dx, in
     dest = irect_clip(dest, irect(0, 0, d->w, d->h));
     if (irect_empty(dest)) return;
     int unscaled = (dw == sw && dh == sh && !flip_x && !flip_y);
+    if (unscaled && comp == COMP_OVER) { blit_plain(d, src, sx, sy, dx, dy, dest, alpha, kind); return; }
+    /* scaled column map once per call */
+    int *cols = malloc(sizeof(int) * (size_t)dest.w);
+    for (int x = 0; x < dest.w; x++) {
+        int rx = dest.x + x - dx;
+        int scol = unscaled ? rx : (int)(((int64_t)rx * sw) / dw);
+        if (flip_x) scol = sw - 1 - scol;
+        cols[x] = scol < 0 ? 0 : scol >= sw ? sw - 1 : scol;
+    }
     for (int y = dest.y; y < dest.y + dest.h; y++) {
         int ry = y - dy;
         int srow = unscaled ? ry : (int)(((int64_t)ry * sh) / dh);
-        if (flip_y) srow = (unscaled ? sh - 1 - ry : sh - 1 - srow);
+        if (flip_y) srow = sh - 1 - srow;
         if (srow < 0) srow = 0;
         if (srow >= sh) srow = sh - 1;
         const uint32_t *sp = src->px + (size_t)(sy + srow) * src->w + sx;
-        uint32_t *dp = d->px + (size_t)y * d->w;
-        for (int x = dest.x; x < dest.x + dest.w; x++) {
-            int rx = x - dx;
-            int scol = unscaled ? rx : (int)(((int64_t)rx * sw) / dw);
-            if (flip_x) scol = sw - 1 - scol;
-            if (scol < 0) scol = 0;
-            if (scol >= sw) scol = sw - 1;
-            uint32_t s = sp[scol];
+        uint32_t *dp = d->px + (size_t)y * d->w + dest.x;
+        for (int x = 0; x < dest.w; x++) {
+            uint32_t s = sp[cols[x]];
             if (kind == KIND_OPAQUE && comp == COMP_OVER && alpha >= 255) { dp[x] = s | 0xFF000000u; continue; }
             int a = PA(s);
             if (kind == KIND_KEY) a = a ? 255 : 0;
@@ -128,6 +181,7 @@ void r_blit(Surf *d, const Surf *src, int sx, int sy, int sw, int sh, int dx, in
             dp[x] = r_comp_px((s & 0x00FFFFFFu) | ((uint32_t)a << 24), dp[x], comp);
         }
     }
+    free(cols);
 }
 
 void r_mask(Surf *d, const uint8_t *mask, int mw, int mh, int dx, int dy, uint32_t c, int comp, IRect clip) {

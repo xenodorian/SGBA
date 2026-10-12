@@ -1,0 +1,114 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SGBA</title></head>
+<body><canvas id="screen" width="640" height="480"></canvas>
+<script>
+// SGBA's own menus, written as a web page and run by the same runtime as the games: the game list, the pause menu and the controller setup.
+const c = document.getElementById('screen'), g = c.getContext('2d');
+const W = 640, H = 480;
+const mode = __sgba_mode();               // 'launcher' | 'pause' | 'wizard'
+const STEPS = [
+  ['up', 'D-pad UP', false], ['down', 'D-pad DOWN', false], ['left', 'D-pad LEFT', false], ['right', 'D-pad RIGHT', false],
+  ['a', 'button A (confirm)', false], ['b', 'button B (back)', false], ['x', 'button X', false], ['y', 'button Y', false],
+  ['l1', 'L1 shoulder', false], ['r1', 'R1 shoulder', false], ['start', 'START', false], ['select', 'SELECT', false],
+  ['l2', 'L2 trigger', true], ['r2', 'R2 trigger', true],
+];
+const NAV = ['up', 'down', 'left', 'right', 'a', 'b', 'start'];
+const BTN = { a: 0, b: 1, x: 2, y: 3, l1: 4, r1: 5, l2: 6, r2: 7, select: 8, start: 9, l3: 10, r3: 11, up: 12, down: 13, left: 14, right: 15 };
+let prev = {}, now = {};
+function readPad() {
+  prev = now; now = {};
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const p = pads && pads[0];
+  for (const k of NAV) now[k] = !!(p && p.buttons[BTN[k]] && p.buttons[BTN[k]].pressed);
+}
+const pressed = (k) => now[k] && !prev[k];
+
+function text(s, x, y, size, color, align) {
+  g.font = 'bold ' + size + 'px sans-serif'; g.textAlign = align || 'left'; g.textBaseline = 'top'; g.fillStyle = color; g.fillText(s, x, y);
+}
+
+// ---- a list menu (games, pause) ----
+let title = 'SGBA', entries = [], index = 0, footer = '', back = null;
+function drawMenu() {
+  g.fillStyle = '#0a0c18'; g.fillRect(0, 0, W, H);
+  text(title, 320, 18, 64, '#fff', 'center');
+  const visible = 9, top = Math.max(0, Math.min(index - 4, entries.length - visible));
+  let y = 100;
+  for (let r = top; r < Math.min(top + visible, entries.length); r++) {
+    if (r === index) { g.fillStyle = '#283c78'; g.fillRect(40, y - 4, 560, 38); }
+    text(entries[r].label.slice(0, 40), 60, y, 36, r === index ? '#fff' : '#aab4d2');
+    y += 40;
+  }
+  text(footer, 320, 450, 24, '#7882a0', 'center');
+}
+function menuStep() {
+  if (pressed('up')) index = index === 0 ? entries.length - 1 : index - 1;
+  else if (pressed('down')) index = index === entries.length - 1 ? 0 : index + 1;
+  else if (pressed('a') || pressed('start')) entries[index].run();
+  else if (pressed('b') && back) back();
+}
+
+// ---- controller setup ----
+let step = 0, bindings = {}, cooldown = 30, idle = 0, message = '';
+function wizardStep() {
+  if (cooldown > 0) cooldown--;
+  idle++;
+  const ev = __sgba_raw_next();            // null, 'button:3', 'hat:0:left', 'axis:1:+', 'key'
+  if (idle > 120 * 60) return finishWizard(false);
+  if (ev === 'key') return finishWizard(null);          // a keyboard works as it is: do not ask again
+  if (!ev || cooldown > 0) return;
+  idle = 0;
+  const [action, , optional] = STEPS[step];
+  if (optional && (bindings.b || []).some((s) => s === ev)) { step++; cooldown = 27; message = ''; return checkDone(); }
+  for (const a in bindings) if (bindings[a][0] === ev) { message = 'Already used for ' + a.toUpperCase() + '. Press a different one.'; cooldown = 24; return; }
+  bindings[action] = [ev]; step++; cooldown = 27; message = '';
+  checkDone();
+}
+function checkDone() { if (step >= STEPS.length) finishWizard(true); }
+function finishWizard(saved) {
+  if (saved === true) {
+    const out = {};
+    for (const a in bindings) out[a] = bindings[a].map((s) => { const p = s.split(':'); return p[0] === 'button' ? ['button', +p[1]] : [p[0], +p[1], p[2]]; });
+    __sgba_save_controls(JSON.stringify({ version: 1, bindings: out }));
+  } else if (saved === null) __sgba_save_controls(JSON.stringify({ version: 1, bindings: null }));
+  __sgba_action(mode === 'wizard' ? 'done' : 'menu');
+  if (mode !== 'wizard') startMenu();
+}
+function drawWizard() {
+  g.fillStyle = '#0c101c'; g.fillRect(0, 0, W, H);
+  text('Controller setup', 320, 24, 56, '#fff', 'center');
+  const s = STEPS[Math.min(step, STEPS.length - 1)];
+  text('Step ' + (step + 1) + ' of ' + STEPS.length, 320, 90, 28, '#96a0be', 'center');
+  text('Press', 320, 170, 44, '#c8d2f0', 'center');
+  text(s[1], 320, 220, 72, '#ffdc5a', 'center');
+  if (s[2]) text('Not on your device? Press your B button to skip.', 320, 320, 28, '#96a0be', 'center');
+  if (message) text(message, 320, 360, 30, '#ff7878', 'center');
+  text('No pad buttons respond? Using a keyboard? Press any key to skip.', 320, 440, 24, '#7882a0', 'center');
+}
+
+// ---- modes ----
+let screenMode = 'menu';
+function startMenu() {
+  screenMode = 'menu'; index = 0;
+  if (mode === 'pause') {
+    title = 'Paused'; footer = 'Up/Down: choose    A: select    B: resume';
+    entries = [{ label: 'Resume', run: () => __sgba_action('resume') }, { label: 'Controller setup', run: startWizard }, { label: 'Quit game', run: () => __sgba_action('quit') }];
+    back = () => __sgba_action('resume');
+  } else {
+    title = 'SGBA'; footer = 'Up/Down: choose    A: start    In a game: Start+Select opens the menu'; back = null;
+    entries = [];
+    for (const gme of JSON.parse(__sgba_list_games())) entries.push({ label: gme.title, run: () => __sgba_action('launch:' + gme.path) });
+    if (!entries.length) entries.push({ label: 'No games found. Put game folders in the games folder.', run: () => {} });
+    entries.push({ label: 'Controller setup', run: startWizard }, { label: 'Quit', run: () => __sgba_action('quit') });
+  }
+}
+function startWizard() { screenMode = 'wizard'; step = 0; bindings = {}; cooldown = 30; idle = 0; message = ''; __sgba_raw_clear(); }
+
+if (mode === 'wizard') startWizard(); else startMenu();
+(function frame() {
+  readPad();
+  if (screenMode === 'wizard') { wizardStep(); if (screenMode === 'wizard') drawWizard(); }
+  else { menuStep(); drawMenu(); }
+  requestAnimationFrame(frame);
+})();
+</script></body></html>

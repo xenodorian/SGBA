@@ -33,6 +33,13 @@ pushing and noting after each.
 - [ ] C1. Remove the Python runtime from both bundles once B2 passes and the device run is confirmed
 - [ ] C2. Move the build and test tools off Python if wanted
 
+## D. Later, after the emulator work (game changes, from the owner)
+
+- [ ] D1. Intro (story) scenes: draw only the background that belongs to the scene, fitted to the screen. Today the title scene
+      shows behind it, so two backgrounds appear (a story picture on the top part and the title background below).
+- [ ] D2. Intro scenes: show only one Perry. Today the title Perry and the story's Perry are both drawn.
+      (Both seen in the web build and on SGBA; fix in the game files, then bump the cache stamp.)
+
 ## Notes
 
 (see the log at the bottom of `Current_Work.md` for dated entries)

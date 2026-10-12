@@ -33,6 +33,7 @@ Natives *host_natives(Host *h);
 void natives_init(Host *h, Natives *n, const char *save_path);
 void natives_shutdown(Host *h, Natives *n);
 void natives_page_loaded(Host *h, Natives *n);
+void images_preload_patterns(Natives *n, const char *root, char **patterns, int np);
 void natives_begin_frame(Host *h, Natives *n);
 void natives_end_tick(Host *h, Natives *n);
 

@@ -4,6 +4,12 @@
 #include <sys/stat.h>
 #include <ctype.h>
 #include "sgba.h"
+#include "json.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 static FILE *g_log = NULL;
 
@@ -91,3 +97,58 @@ unsigned char *sg_read_file(const char *path, size_t *size) {
     if (size) *size = got;
     return buf;
 }
+
+/* glob: * matches any run, ? any one character (case-insensitive, / is ordinary) */
+int sg_glob(const char *p, const char *t) {
+    while (*p) {
+        if (*p == '*') { while (*p == '*') p++; if (!*p) return 1; for (; *t; t++) if (sg_glob(p, t)) return 1; return sg_glob(p, t); }
+        if (!*t || (*p != '?' && tolower((unsigned char)*p) != tolower((unsigned char)*t))) return 0;
+        p++; t++;
+    }
+    return !*t;
+}
+
+char *sg_exe_dir(const char *argv0) {
+    char buf[2048];
+#ifdef _WIN32
+    DWORD n = GetModuleFileNameA(NULL, buf, sizeof buf);
+    if (n == 0 || n >= sizeof buf) return strdup(".");
+#else
+    ssize_t n = readlink("/proc/self/exe", buf, sizeof buf - 1);
+    if (n <= 0) { if (!argv0) return strdup("."); snprintf(buf, sizeof buf, "%s", argv0); n = (ssize_t)strlen(buf); }
+    buf[n] = 0;
+#endif
+    char *slash = strrchr(buf, '/');
+#ifdef _WIN32
+    char *bs = strrchr(buf, '\\');
+    if (bs && (!slash || bs > slash)) slash = bs;
+#endif
+    if (!slash) return strdup(".");
+    *slash = 0;
+    return strdup(buf);
+}
+
+void config_load(const char *root, Config *c) {
+    memset(c, 0, sizeof *c);
+    c->fps = 60; c->image_budget_mb = 96;
+    char path[2048];
+    snprintf(path, sizeof path, "%s/sgba_ui.json", root);
+    char *text = (char *)sg_read_file(path, NULL);
+    if (!text) return;
+    JNode *r = json_parse(text);
+    free(text);
+    double fps = json_num(json_get(r, "fps"), 60);
+    c->fps = fps < 10 ? 10 : fps > 60 ? 60 : (int)fps;
+    c->alpha_keep = !strcmp(json_str(json_get(r, "alpha"), "threshold"), "keep");
+    c->image_budget_mb = (int)json_num(json_get(r, "image_budget_mb"), 96);
+    JNode *pre = json_get(r, "preload");
+    if (pre && pre->type == J_ARR) {
+        c->preload = calloc((size_t)pre->count + 1, sizeof(char *));
+        for (int i = 0; i < pre->count; i++) if (pre->items[i]->type == J_STR) c->preload[c->npreload++] = strdup(pre->items[i]->str);
+    }
+    const char *title = json_str(json_get(r, "title"), NULL);
+    if (title) c->title = strdup(title);
+    json_free(r);
+}
+
+void config_free(Config *c) { for (int i = 0; i < c->npreload; i++) free(c->preload[i]); free(c->preload); free(c->title); }
