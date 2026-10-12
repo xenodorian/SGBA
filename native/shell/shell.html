@@ -39,7 +39,7 @@ function drawMenu() {
     text(entries[r].label.slice(0, 40), 60, y, 36, r === index ? '#fff' : '#aab4d2');
     y += 40;
   }
-  text(footer, 320, 450, 24, '#7882a0', 'center');
+  text(footer, 320, 452, 20, '#7882a0', 'center');
 }
 function menuStep() {
   if (pressed('up')) index = index === 0 ? entries.length - 1 : index - 1;

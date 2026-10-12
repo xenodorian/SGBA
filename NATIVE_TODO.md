@@ -11,16 +11,16 @@ pushing and noting after each.
 
 ## A. Can be done in C (do first)
 
-- [ ] A1. Scaffold `native/`: vendored QuickJS-ng, stb (image, truetype, vorbis, image_write), SDL2 headers; Makefile for linux-x86_64 and aarch64
-- [ ] A2. Host: load the game's `index.html`, run its scripts in QuickJS with `sgba_js_shim.js` (unchanged), timers and requestAnimationFrame on a fixed step
-- [ ] A3. Window and display through SDL2 loaded at run time (dlopen), 640x480, scale to the screen, headless mode for tests (`--shot`, `--frames`)
-- [ ] A4. Images: lazy PNG decode (stb_image), byte-budgeted LRU, colorkey/alpha/opaque kinds as in `sgba_gfx.py`
-- [ ] A5. Canvas 2D in C: state, transforms, rects, paths, clip, drawImage, text, gradients, composite modes, retained main canvas with frame diff, groups
-- [ ] A6. Audio: Ogg decode (stb_vorbis), SFX cache, streamed music, mixer in the SDL audio callback, the `__py_audio_*` commands
-- [ ] A7. Input: keyboard events to the page, pad as the standard Gamepad, controls.json mapping, Start+Select
-- [ ] A8. Saves (localStorage file), local file reads (fetch/XHR), preload hook, perf log
-- [ ] A9. Menus and the controller setup as a small JavaScript page run by the same runtime (canvas drawn)
-- [ ] A10. Checks: game boots to the title and plays level 1 with zero JS errors; speed numbers in the simulator; push and note
+- [x] A1. Scaffold `native/`: vendored QuickJS-ng, stb (image, truetype, vorbis, image_write), SDL2 headers; Makefile for linux-x86_64 and aarch64
+- [x] A2. Host: load the game's `index.html`, run its scripts in QuickJS with `sgba_js_shim.js` (unchanged), timers and requestAnimationFrame on a fixed step
+- [x] A3. Window and display through SDL2 loaded at run time (dlopen), 640x480, scale to the screen, headless mode for tests (`--shot`, `--frames`)
+- [x] A4. Images: lazy PNG decode (stb_image), byte-budgeted LRU, colorkey/alpha/opaque kinds as in `sgba_gfx.py`
+- [x] A5. Canvas 2D in C: state, transforms, rects, paths, clip, drawImage, text, gradients, composite modes, retained main canvas with frame diff, groups
+- [x] A6. Audio: Ogg decode (stb_vorbis), SFX cache, streamed music, mixer in the SDL audio callback, the `__py_audio_*` commands
+- [x] A7. Input: keyboard events to the page, pad as the standard Gamepad, controls.json mapping, Start+Select
+- [x] A8. Saves (localStorage file), local file reads (fetch/XHR), preload hook, perf log
+- [x] A9. Menus and the controller setup as a small JavaScript page run by the same runtime (canvas drawn)
+- [x] A10. Checks: game boots to the title and plays level 1 with zero JS errors; speed numbers in the simulator; push and note
 
 ## B. Costs real work (one at a time, in this order)
 
@@ -42,4 +42,5 @@ pushing and noting after each.
 
 ## Notes
 
-(see the log at the bottom of `Current_Work.md` for dated entries)
+Dated entries are at the bottom of `Current_Work.md`.
+A note on A9/A10: HTML menus drawn over the game (the game's own buttons) are item B1, so interactive play of Parry Perry needs B1 first; the headless runs drive the game by script.

@@ -135,3 +135,14 @@ Direction (owner, 2026-10-11): no more device information is available. The runt
 ## Native runtime (C) in progress
 
 The plan and checklist are in `NATIVE_TODO.md`. Entries below are dated notes as each step is pushed.
+
+### 2026-10-12: native runtime, list A done (A1 to A10)
+
+- `native/` holds a C runtime: vendored QuickJS-ng 0.17.0 (full source from the v0.17.0 tag, the PyPI sdist lacks generated headers), stb (image, truetype, vorbis, image_write), SDL2 headers (types only; SDL2 itself is loaded at run time with dlopen / LoadLibrary).
+- It runs the same game folder: `sgba_js_shim.js` is embedded unchanged, `__py_*` natives are implemented in C (canvas, images, audio, storage, files).
+- Canvas 2D in C follows `sgba_canvas.py`: op recording, frame diff, dirty rectangles, groups, composite modes, text (stb_truetype with pygame's default font), gradients, shear/rotate.
+- Audio: Ogg and WAV via stb_vorbis, 22.05 kHz mixer in the SDL callback, streamed music decoded by a helper thread, small SFX cache. Mixer output checked through SDL's disk audio driver.
+- Input: keyboard and pad, `controls.json` bindings, raw presses for the setup page. Menus (launcher, pause, controller setup) are a web page (`native/shell/shell.html`) run by the same runtime.
+- Build: `make -C native` (x86_64), `make -C native TARGET=aarch64`. Run: `native/build/x86_64/sgba GAME_FOLDER [--frames N --shot out.png --script S --js F=CODE]` for headless runs, or without `--frames` for a window.
+- Speed (aarch64 build under QEMU, one core, steady state, per frame): title 12.6 ms, level 1 14.7 ms, level 4 13.5 ms. The Python runtime measured 54, 28 and 38.8 ms in the same simulator. The simulator is a proxy, not the device.
+- Not done yet: HTML overlay menus (B1), pixel parity with the Python canvas (B2), packaging and the R36S glibc baseline (B3). Intro-scene fixes are on the list as D1, D2.

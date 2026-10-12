@@ -231,7 +231,7 @@ static Sfx *get_sfx(Audio *a, const char *path) {
 static int audio_init(Audio *a) {
     if (a->ready) return a->ready > 0;
     a->ready = -1;
-    if (getenv("SGBA_NOAUDIO")) return 0;
+    if (getenv("SGBA_NOAUDIO") || !sdl.InitSubSystem) return 0;
     if (sdl.InitSubSystem(SDL_INIT_AUDIO) != 0) { sg_log("warn", "audio unavailable, running silent: %s", sdl.GetError()); return 0; }
     SDL_AudioSpec want, have;
     memset(&want, 0, sizeof want);

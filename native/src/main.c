@@ -107,7 +107,7 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
     int result = END_QUIT;
     if (*started_at == 0) *started_at = last;
     for (;;) {
-        if (max_seconds > 0 && now_ms() - *started_at > max_seconds * 1000.0) return END_QUIT;
+        if (max_seconds > 0 && now_ms() - *started_at > max_seconds * 1000.0) { const char *sp = getenv("SGBA_SHOT"); if (sp && surface) write_png(sp, surface); return END_QUIT; }
         SDL_Event e;
         int quit = 0;
         while (sdl.PollEvent(&e)) {
@@ -249,13 +249,12 @@ int main(int argc, char **argv) {
         }
         else if (argv[i][0] != '-') game = argv[i];
     }
-    if (!game) { fprintf(stderr, "usage: sgba GAME_FOLDER [--frames N] [--hz 60] [--save FILE] [--script S] [--js FRAME=CODE] [--shot out.png]\n"); return 2; }
+    if (!game && frames) { fprintf(stderr, "usage: sgba GAME_FOLDER [--frames N] [--hz 60] [--save FILE] [--script S] [--js FRAME=CODE] [--shot out.png]\n"); return 2; }
     char *app = sg_exe_dir(argv[0]);
-    char logpath[2048], savepath[2048];
+    char logpath[2048];
     snprintf(logpath, sizeof logpath, "%s/sgba.log", app);
     sg_log_open(logpath);
     if (!frames) {
-        if (!save) { const char *base = strrchr(game, '/'); snprintf(savepath, sizeof savepath, "%s/saves/%s.json", app, base ? base + 1 : game); save = savepath; }
         char dir[2100]; snprintf(dir, sizeof dir, "%s/saves", app);
 #ifdef _WIN32
         mkdir(dir);
