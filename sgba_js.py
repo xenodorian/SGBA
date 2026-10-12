@@ -606,10 +606,21 @@ class JSGame:
 
     _pad_state = None
     _pad_text = ""
+    _keys_flag = False
+
+    def _keys_listened(self) -> bool:
+        if not self._keys_flag:
+            try:
+                self._keys_flag = bool(self.host.ctx.eval("!!globalThis.__sgba_keys"))
+            except Exception:
+                return False
+        return self._keys_flag
 
     def _pad_json(self, inputs, neutral: bool) -> str:
         """The standard-layout gamepad as JSON; rebuilt only when a button or stick actually changes."""
         down = inputs.down
+        if self._keys_listened():           # the page reads the keyboard itself: do not also send those keys as pad buttons
+            down = getattr(inputs, "down_device", down)
         state = (False,) * 20 if neutral else tuple(bool(down(a)) for a in STANDARD_BUTTONS) + (
             bool(down("rs_left")), bool(down("rs_right")), bool(down("rs_up")), bool(down("rs_down")))
         if state != self._pad_state:
@@ -674,8 +685,21 @@ class JSGame:
         started = time.perf_counter()
         try:
             self._update(dt, inputs)
+        except Exception as exc:        # a bad frame must not end the game: log it and carry on
+            self._survive("update", exc)
         finally:
             self._perf_note("update", started)
+
+    _survived = 0
+
+    def _survive(self, where: str, exc: Exception) -> None:
+        self._survived += 1
+        self.host.errors += 1
+        if self._survived <= 20:
+            import traceback
+            self.host.log_fn("error", f"{where} failed ({type(exc).__name__}): " + "".join(traceback.format_exception(exc)).strip())
+        if self._survived > 600:        # failing every frame: give up rather than spin
+            raise exc
 
     def _update(self, dt: float, inputs) -> None:
         mode = self.config["navigation"]
@@ -713,6 +737,9 @@ class JSGame:
         started = time.perf_counter()
         try:
             return self._draw(surface)
+        except Exception as exc:
+            self._survive("draw", exc)
+            return []
         finally:
             self._perf_note("draw", started)
 

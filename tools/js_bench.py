@@ -84,7 +84,7 @@ def main() -> int:
         overrides["image_budget_mb"] = args.budget
     original = sgba_js.JSGame._load_config
     sgba_js.JSGame._load_config = staticmethod(lambda root: dict(original(root), **overrides))
-    game = sgba_js.JSGame(args.root, save_dir=Path(__import__("tempfile").mkdtemp()), log=lambda *a: None)
+    game = sgba_js.JSGame(args.root, save_dir=Path(__import__("tempfile").mkdtemp()), log=(lambda *a: print("LOG", *a)) if os.environ.get("SGBA_BENCH_LOG") else (lambda *a: None))
     game.config["navigation"] = args.nav
     inputs = runtime.InputState()
     surface = pygame.Surface(game.logical_size, 0, game.surface_depth)

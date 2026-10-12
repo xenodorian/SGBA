@@ -457,6 +457,17 @@ class Canvas2D:
                 return "alpha"
             self.emit(("SI", tuple(rect), r, g, b, a), rect, draw_source_in)
             return
+        if self.s["comp"] == "source-atop":
+            if a <= 0:
+                return
+
+            def draw_source_atop(surface, rect=rect, r=r, g=g, b=b, a=a):
+                keep = 255 - a                                          # wash the pixels already there, leave transparent ones alone
+                surface.fill((keep, keep, keep, 255), rect, pygame.BLEND_RGBA_MULT)
+                surface.fill((r * a // 255, g * a // 255, b * a // 255, 0), rect, pygame.BLEND_RGBA_ADD)
+                return "alpha"
+            self.emit(("SA", tuple(rect), r, g, b, a), rect, draw_source_atop)
+            return
         if a <= 0:
             return
         covers = a >= 255 and not flags

@@ -69,6 +69,7 @@
     constructor() { this.__l = {}; }
     addEventListener(type, fn, opts) {
       if (!fn) return;
+      if (type === 'keydown') g.__sgba_keys = true;
       const list = (this.__l[type] = this.__l[type] || []);
       if (!list.some((x) => x.fn === fn)) list.push({ fn, once: !!(opts && typeof opts === 'object' && opts.once) });
     }

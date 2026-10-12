@@ -493,6 +493,11 @@ class InputState:
         self._validate_action(action)
         return bool(self._sources[action])
 
+    def down_device(self, action: str) -> bool:
+        """Held by a pad (anything but the keyboard)."""
+        self._validate_action(action)
+        return any(source[0] != "key" for source in self._sources[action])
+
     def pressed(self, action: str) -> bool:
         self._validate_action(action)
         return action in self._pressed
@@ -708,6 +713,10 @@ def main() -> int:
             run_scene(display, inputs, game, logical_size)
         else:
             sgba_shell.shell_main(display, inputs, sys.modules[__name__])
+    except Exception:
+        import traceback
+        sgba_shell.log("crash: " + traceback.format_exc())
+        raise
     finally:
         pygame.quit()
     return 0

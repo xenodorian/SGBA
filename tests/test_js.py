@@ -51,6 +51,25 @@ class JSHostTests(unittest.TestCase):
         game.draw(out)
         return out
 
+    def test_source_atop_washes_only_existing_pixels(self):
+        game, _ = self.make("const c=document.createElement('canvas');c.width=20;c.height=20;const x=c.getContext('2d');"
+                            "x.fillStyle='#00ff00';x.fillRect(0,0,10,20);x.globalCompositeOperation='source-atop';"
+                            "x.globalAlpha=0.5;x.fillStyle='#ff0000';x.fillRect(0,0,20,20);"
+                            "const g=document.getElementById('view').getContext('2d');g.drawImage(c,0,0);")
+        out = self.run_frames(game)
+        r, g, b = tuple(out.get_at((5, 5)))[:3]
+        self.assertTrue(120 <= r <= 135 and 120 <= g <= 135 and b == 0)
+        self.assertEqual(tuple(out.get_at((15, 5)))[:3], (0, 0, 0))     # transparent pixels stay empty
+
+    def test_keyboard_is_not_also_a_pad_when_the_page_reads_keys(self):
+        game, _ = self.make("addEventListener('keydown',()=>{});")
+        self.run_frames(game, 1)
+        inputs = runtime.InputState()
+        inputs.process(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_a))
+        self.assertTrue(inputs.down("left"))
+        self.assertFalse(inputs.down_device("left"))
+        self.assertIn('"pressed": false', game._pad_json(inputs, False))
+
     def test_canvas_size_comes_from_html_and_rects_draw(self):
         game, _ = self.make("const c=document.getElementById('view');const x=c.getContext('2d');"
                             "x.fillStyle='#ff0000';x.fillRect(2,3,10,10);x.fillStyle='rgba(0,0,255,0.5)';x.fillRect(20,20,4,4);")
