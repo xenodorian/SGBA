@@ -24,6 +24,41 @@ class RuntimeTests(unittest.TestCase):
     def tearDownClass(cls):
         pygame.quit()
 
+    def test_start_select_opens_pause_hook_and_can_resume(self):
+        display = pygame.display.set_mode((64, 48))
+        calls = []
+        resumed = []
+
+        class Game:
+            finished = False
+            frames = 0
+
+            def update(self, dt, inputs):
+                self.frames += 1
+                if self.frames == 3:
+                    inputs._set("start", ("key", 1), True)
+                    inputs._set("select", ("key", 2), True)
+                if self.frames == 4:
+                    inputs._set("start", ("key", 1), False)
+                    inputs._set("select", ("key", 2), False)
+                if self.frames > 8:
+                    self.finished = True
+
+            def draw(self, surface):
+                pass
+
+            def resume(self):
+                resumed.append(True)
+
+        def hook(d, i, g):
+            calls.append(True)
+            return "resume"
+
+        result = runtime.run_scene(display, runtime.InputState(), Game(), (64, 48), on_combo=hook)
+        self.assertEqual(result, "done")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(resumed), 1)
+
     def test_default_resolution_is_640_by_480(self):
         self.assertEqual(runtime.LOGICAL_SIZE, (640, 480))
         self.assertEqual(runtime.DEFAULT_LOGICAL_SIZE, (640, 480))

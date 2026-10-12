@@ -226,7 +226,10 @@ class ControllerWizard:
 class Menu:
     """Game list. Up/Down moves, A starts, B or Start+Select quits."""
 
-    def __init__(self, entries: list) -> None:
+    def __init__(self, entries: list, title: str = "SGBA", footer: str = None, back=None) -> None:
+        self.title = title
+        self.footer = footer or "Up/Down: choose    A: start    In a game: Start+Select returns here"
+        self.back = back                # choice made when B is pressed (None: B does nothing)
         self.entries = entries          # (label, kind, payload, enabled)
         self.index = 0
         self.choice = None
@@ -243,6 +246,9 @@ class Menu:
             self.index = max(0, self.index - 8)
         elif inputs.pressed("right"):
             self.index = min(last, self.index + 8)
+        elif inputs.pressed("b") and self.back is not None:
+            self.choice = self.back
+            self.finished = True
         elif inputs.pressed("a") or inputs.pressed("start"):
             label, kind, payload, enabled = self.entries[self.index]
             if enabled:
@@ -251,7 +257,7 @@ class Menu:
 
     def draw(self, surface: pygame.Surface) -> None:
         surface.fill((10, 12, 24))
-        _text(surface, "SGBA", 64, (255, 255, 255), (320, 18), center=True)
+        _text(surface, self.title, 64, (255, 255, 255), (320, 18), center=True)
         visible = 9
         top = max(0, min(self.index - visible // 2, len(self.entries) - visible))
         y = 100
@@ -267,8 +273,7 @@ class Menu:
             y += 40
         if len(self.entries) > visible:
             _text(surface, f"{self.index + 1} / {len(self.entries)}", 24, (120, 130, 160), (600, 100), center=True)
-        _text(surface, "Up/Down: choose    A: start    In a game: Start+Select returns here", 24,
-              (120, 130, 160), (320, 450), center=True)
+        _text(surface, self.footer, 24, (120, 130, 160), (320, 450), center=True)
 
 
 class ErrorScreen:
@@ -363,6 +368,22 @@ def run_wizard(display, inputs, rt) -> str:
         save_controls(None)    # keyboard (or keyboard-emulating pad) works; do not ask again
         log("controller setup skipped: keyboard input detected")
     return result
+
+
+def pause_menu(display, inputs, rt) -> str:
+    """Opened by Start+Select inside a game. Returns "resume", "done" or "closed"."""
+    while True:
+        menu = Menu([("Resume", "resume", None, True), ("Controller setup", "setup", None, True),
+                     ("Quit game", "quit", None, True)],
+                    title="Paused", footer="Up/Down: choose    A: select    B: resume", back=("resume", None))
+        if rt.run_scene(display, inputs, menu, MENU_SIZE, exit_on_combo=False) == "closed":
+            return "closed"
+        kind = menu.choice[0] if menu.choice else "resume"
+        if kind == "setup":
+            if run_wizard(display, inputs, rt) == "closed":
+                return "closed"
+            continue
+        return {"quit": "done"}.get(kind, "resume")
 
 
 def shell_main(display, inputs, rt) -> None:

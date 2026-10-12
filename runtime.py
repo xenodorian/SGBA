@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pygame
@@ -562,7 +563,7 @@ def open_game(original):
 
 
 def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size: tuple,
-              exit_on_combo: bool = True) -> str:
+              exit_on_combo: bool = True, on_combo=None) -> str:
     """Run one game or shell scene until it ends. Returns "closed" (window closed) or "done".
 
     A scene ends when it sets a truthy `finished` attribute, on Esc, or on Start+Select.
@@ -570,6 +571,9 @@ def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size:
     A game may set `retained = True`: its surface then keeps its pixels from frame to frame and draw() returns
     the list of rectangles that changed (empty = nothing to show). Only those are copied to the screen, like a
     console that updates just the parts of the picture that moved.
+
+    `on_combo(display, inputs, game)` replaces the Start+Select exit: it may show a menu and returns "resume",
+    "done" or "closed".
     """
     update = getattr(game, "update", None)
     retained = bool(getattr(game, "retained", False))
@@ -597,7 +601,21 @@ def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size:
         if not combo:
             combo_armed = True
         elif exit_on_combo and combo_armed:
-            return "done"
+            if on_combo is None:
+                return "done"
+            outcome = on_combo(display, inputs, game)
+            if outcome != "resume":
+                return outcome
+            inputs.consume_edges()
+            combo_armed = False
+            accumulator = 0.0
+            clock.tick()
+            display.fill((0, 0, 0))
+            pygame.display.flip()
+            resume = getattr(game, "resume", None)
+            if callable(resume):
+                resume()
+            continue
 
         elapsed = min(clock.tick(SIMULATION_HZ) / 1000.0, MAX_FRAME_TIME)
         accumulator = min(accumulator + elapsed, FIXED_DT * MAX_CATCH_UP_STEPS)
@@ -626,10 +644,14 @@ def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size:
             rects = None
         dw, dh = display.get_size()
         lw, lh = logical_size
+        shown_at = time.perf_counter()
         if rects is not None and (dw, dh) == (lw, lh):    # one-to-one: copy only what changed
             for r in rects:
                 display.blit(logical, r.topleft, r)
             pygame.display.update(rects)
+            note = getattr(game, "note_present", None)
+            if note:
+                note(time.perf_counter() - shown_at)
             continue
         scale = min(dw / lw, dh / lh)
         scaled_size = (max(1, round(lw * scale)), max(1, round(lh * scale)))
@@ -709,8 +731,12 @@ def main() -> int:
                        f"joysticks {pygame.joystick.get_count()}")
         pygame.display.set_caption(f"SGBA: {game_title}")
         if direct is not None:
+            if not sgba_shell.load_controls()[0] and pygame.joystick.get_count() > 0:
+                if sgba_shell.run_wizard(display, inputs, sys.modules[__name__]) == "closed":
+                    return 0
             game, logical_size, _entry = open_game(direct)
-            run_scene(display, inputs, game, logical_size)
+            run_scene(display, inputs, game, logical_size,
+                      on_combo=lambda d, i, g: sgba_shell.pause_menu(d, i, sys.modules[__name__]))
         else:
             sgba_shell.shell_main(display, inputs, sys.modules[__name__])
     except Exception:

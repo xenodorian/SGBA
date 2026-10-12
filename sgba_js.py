@@ -560,7 +560,7 @@ class JSGame:
             self.host.ctx.eval(f"__sgba_set_hide({json.dumps(hide)})")
         self.ui = sgba_js_ui.DomOverlay(self.host)
         self._held: dict = {}
-        self._perf = {"update": 0.0, "draw": 0.0, "frame": 0.0, "worst": 0.0, "n": 0}
+        self._perf = {"update": 0.0, "draw": 0.0, "frame": 0.0, "worst": 0.0, "n": 0, "updates": 0, "present": 0.0}
         self._preload(root)
         gc.collect()
         gc.freeze()          # everything built so far is permanent: keep it out of later garbage-collection passes
@@ -603,6 +603,11 @@ class JSGame:
             self.host.key_event("keydown", event.key)
         elif event.type == pygame.KEYUP:
             self.host.key_event("keyup", event.key)
+
+    def resume(self) -> None:
+        """Back from an engine menu drawn over the game: repaint everything and forget held buttons."""
+        self.host.first_frame = True
+        self._pad_state = None
 
     _pad_state = None
     _pad_text = ""
@@ -651,10 +656,15 @@ class JSGame:
 
     _perf_every = 600          # frames between performance log lines (about ten seconds)
 
+    def note_present(self, seconds: float) -> None:
+        self._perf["present"] += seconds
+
     def _perf_note(self, kind: str, started: float) -> None:
         elapsed = time.perf_counter() - started
         perf = self._perf
         perf[kind] += elapsed
+        if kind == "update":
+            perf["updates"] += 1
         if kind == "draw":
             perf["n"] += 1
             perf["worst"] = max(perf["worst"], perf["frame"] + elapsed)
@@ -675,11 +685,14 @@ class JSGame:
         except OSError:
             pass
         store = host.images
-        host.log_fn("info", f"perf: {n} frames, update {perf['update'] / n * 1000:.1f} ms, draw {perf['draw'] / n * 1000:.1f} ms, "
+        steps = max(1, perf["updates"])
+        host.log_fn("info", f"perf: {n} frames, {perf['updates'] / n:.2f} updates/frame, update {perf['update'] / steps * 1000:.1f} ms each "
+                            f"({perf['update'] / n * 1000:.1f} per frame), draw {perf['draw'] / n * 1000:.1f} ms, "
+                            f"present {perf['present'] / n * 1000:.1f} ms, "
                             f"worst {perf['worst'] * 1000:.0f} ms,{rss}, images {store.decoded_count}/{len(store.entries)} "
                             f"({store.bytes // 1048576} MB, {store.evictions} evictions), composited {host.stats.replayed // n} ops/frame, "
                             f"js errors {host.errors}")
-        self._perf = {"update": 0.0, "draw": 0.0, "frame": 0.0, "worst": 0.0, "n": 0}
+        self._perf = {"update": 0.0, "draw": 0.0, "frame": 0.0, "worst": 0.0, "n": 0, "updates": 0, "present": 0.0}
 
     def update(self, dt: float, inputs) -> None:
         started = time.perf_counter()
