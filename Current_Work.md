@@ -146,3 +146,8 @@ The plan and checklist are in `NATIVE_TODO.md`. Entries below are dated notes as
 - Build: `make -C native` (x86_64), `make -C native TARGET=aarch64`. Run: `native/build/x86_64/sgba GAME_FOLDER [--frames N --shot out.png --script S --js F=CODE]` for headless runs, or without `--frames` for a window.
 - Speed (aarch64 build under QEMU, one core, steady state, per frame): title 12.6 ms, level 1 14.7 ms, level 4 13.5 ms. The Python runtime measured 54, 28 and 38.8 ms in the same simulator. The simulator is a proxy, not the device.
 - Not done yet: HTML overlay menus (B1), pixel parity with the Python canvas (B2), packaging and the R36S glibc baseline (B3). Intro-scene fixes are on the list as D1, D2.
+
+2026-10-12: native runtime, B1 done (HTML menus over the game)
+- native/shell/overlay.js (port of sgba_js_ui.py) lays the page's buttons out on a panel canvas; the runtime darkens the game (alpha 110) and draws the panel over it.
+- Pad navigation in "engine" mode (up/down with repeat, A click, B back, hotkeys, neutral pad to the game while a menu is open); "game" mode only draws. Config keys navigation, hotkeys, hide read from sgba_ui.json.
+- Checked on the Parry Perry start menu: panel draws, focus and clicks work. Not yet run on a real display or pad.

@@ -24,7 +24,7 @@ pushing and noting after each.
 
 ## B. Costs real work (one at a time, in this order)
 
-- [ ] B1. HTML menus: lay out and draw the HTML/CSS subset the games use so buttons are pad-navigable (the overlay in `sgba_js_ui.py`)
+- [x] B1. HTML menus: lay out and draw the HTML/CSS subset the games use so buttons are pad-navigable (the overlay in `sgba_js_ui.py`)
 - [ ] B2. Drawing parity: pixel comparison of the C canvas against the Python canvas on the 7 reference scenes, fix differences, set tolerances
 - [ ] B3. R36S build baseline: old glibc, runs on ArkOS 2, cross build in CI, packaged like the current bundle (Windows build too)
 

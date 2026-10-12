@@ -4,6 +4,8 @@
 #include "sgba.h"
 #include "natives.h"
 
+extern const unsigned char overlay_js[];
+extern const unsigned long overlay_js_len;
 extern const unsigned char shim_js[];
 extern const unsigned long shim_js_len;
 
@@ -13,7 +15,7 @@ struct Host {
     char *root;
     double clock_ms;
     int errors;
-    JSValue fn_tick, fn_key, fn_pads, fn_load_html;
+    JSValue fn_tick, fn_key, fn_pads, fn_load_html, fn_overlay_tick, fn_overlay_nav, fn_overlay_hotkey;
     char *pads_json;
     Config cfg;
     Natives nat;
@@ -62,6 +64,45 @@ int host_eval_int(Host *h, const char *code, int fallback) {
     return out;
 }
 
+void host_enable_overlay(Host *h) {
+    JSValue v = JS_Eval(h->ctx, (const char *)overlay_js, overlay_js_len, "overlay.js", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(v)) report_exception(h, "overlay"); else JS_FreeValue(h->ctx, v);
+    JSValue g = JS_GetGlobalObject(h->ctx);
+    h->fn_overlay_tick = JS_GetPropertyStr(h->ctx, g, "__sgba_overlay_tick");
+    h->fn_overlay_nav = JS_GetPropertyStr(h->ctx, g, "__sgba_overlay_nav");
+    h->fn_overlay_hotkey = JS_GetPropertyStr(h->ctx, g, "__sgba_overlay_hotkey");
+    JS_FreeValue(h->ctx, g);
+    if (h->cfg.nhide) {                                           /* buttons to leave out on a device */
+        size_t cap = 256; for (int i = 0; i < h->cfg.nhide; i++) cap += strlen(h->cfg.hide[i]) * 2 + 8;
+        char *code = malloc(cap), *p = code;
+        p += sprintf(p, "__sgba_set_hide([");
+        for (int i = 0; i < h->cfg.nhide; i++) { p += sprintf(p, "%s\"", i ? "," : ""); for (const char *c = h->cfg.hide[i]; *c; c++) { if (*c == '"' || *c == '\\') *p++ = '\\'; *p++ = *c; } *p++ = '"'; }
+        p += sprintf(p, "]);");
+        host_eval(h, code, "hide");
+        free(code);
+    }
+}
+
+int host_overlay_tick_exists(Host *h) { return JS_IsFunction(h->ctx, h->fn_overlay_tick); }
+
+void host_overlay_nav(Host *h, const char *what) {
+    if (!JS_IsFunction(h->ctx, h->fn_overlay_nav)) return;
+    JSValue a = JS_NewString(h->ctx, what);
+    JSValue r = JS_Call(h->ctx, h->fn_overlay_nav, JS_UNDEFINED, 1, &a);
+    if (JS_IsException(r)) report_exception(h, "overlay nav"); else JS_FreeValue(h->ctx, r);
+    JS_FreeValue(h->ctx, a);
+    pump(h);
+}
+
+void host_overlay_hotkey(Host *h, const char *id) {
+    if (!JS_IsFunction(h->ctx, h->fn_overlay_hotkey)) return;
+    JSValue a = JS_NewString(h->ctx, id);
+    JSValue r = JS_Call(h->ctx, h->fn_overlay_hotkey, JS_UNDEFINED, 1, &a);
+    if (JS_IsException(r)) report_exception(h, "overlay hotkey"); else JS_FreeValue(h->ctx, r);
+    JS_FreeValue(h->ctx, a);
+    pump(h);
+}
+
 Host *host_create(const char *root, const char *save_path) {
     Host *h = calloc(1, sizeof *h);
     h->root = strdup(root);
@@ -91,6 +132,9 @@ void host_destroy(Host *h) {
     JS_FreeValue(h->ctx, h->fn_key);
     JS_FreeValue(h->ctx, h->fn_pads);
     JS_FreeValue(h->ctx, h->fn_load_html);
+    JS_FreeValue(h->ctx, h->fn_overlay_tick);
+    JS_FreeValue(h->ctx, h->fn_overlay_nav);
+    JS_FreeValue(h->ctx, h->fn_overlay_hotkey);
     JS_FreeContext(h->ctx);
     JS_FreeRuntime(h->rt);
     free(h->pads_json);
@@ -212,6 +256,11 @@ void host_tick(Host *h, double dt) {
     if (JS_IsException(r)) report_exception(h, "frame"); else JS_FreeValue(h->ctx, r);
     JS_FreeValue(h->ctx, t);
     pump(h);
+    if (JS_IsFunction(h->ctx, h->fn_overlay_tick)) {
+        JSValue o = JS_Call(h->ctx, h->fn_overlay_tick, JS_UNDEFINED, 0, NULL);
+        if (JS_IsException(o)) report_exception(h, "overlay"); else JS_FreeValue(h->ctx, o);
+        pump(h);
+    }
     natives_end_tick(h, &h->nat);
 }
 

@@ -89,6 +89,15 @@ static Display *open_display_any(int fullscreen) {
     return NULL;
 }
 
+/* The game's canvas with the HTML overlay (darkened backdrop plus panel) drawn over it, into `composed`. */
+static void compose_overlay(Surf *composed, const Surf *surface, const Surf *panel, int px, int py) {
+    if (!composed->px) { composed->w = surface->w; composed->h = surface->h; composed->px = malloc((size_t)composed->w * composed->h * 4); }
+    memcpy(composed->px, surface->px, (size_t)composed->w * composed->h * 4);
+    IRect all = { 0, 0, composed->w, composed->h };
+    r_fill_blend(composed, all, RGBA(0, 0, 0, 110), COMP_OVER);
+    r_blit(composed, panel, 0, 0, panel->w, panel->h, px, py, panel->w, panel->h, 0, 0, 255, COMP_OVER, KIND_ALPHA, all);
+}
+
 enum { END_QUIT = 0, END_PAUSE, END_CHOICE };
 
 extern const unsigned char shell_html[];
@@ -103,8 +112,14 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
     double last = now_ms(), acc = 0, t_update = 0, t_draw = 0, t_present = 0;
     long frames = 0, updates = 0, all_frames = 0;
     int keys_listened = 0, armed = 0;
-    char pads[4096];
+    char pads[4096], neutral[4096];
     int result = END_QUIT;
+    Surf composed = { 0, 0, NULL, 0 };
+    int prev[A_COUNT] = {0};
+    double hold[2] = {0, 0}, held_for[2] = {0, 0};      /* up/down auto-repeat */
+    int ov_prev_visible = 0;
+    if (is_game) host_enable_overlay(h);
+    pad_json(0, neutral, sizeof neutral);
     if (*started_at == 0) *started_at = last;
     for (;;) {
         if (max_seconds > 0 && now_ms() - *started_at > max_seconds * 1000.0) { const char *sp = getenv("SGBA_SHOT"); if (sp && surface) write_png(sp, surface); return END_QUIT; }
@@ -128,7 +143,8 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
         else if (is_game && armed) { result = END_PAUSE; break; }
         if (!keys_listened) keys_listened = host_eval_int(h, "globalThis.__sgba_keys ? 1 : 0", 0);
         input_pad_json(in, is_game ? keys_listened : 0, pads, sizeof pads);
-        host_set_pads(h, pads);
+        int modal = is_game && nat->ov_modal && cfg->engine_nav;
+        host_set_pads(h, modal ? neutral : pads);
         double t = now_ms();
         double elapsed = t - last;
         last = t;
@@ -144,10 +160,43 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
             if (g_app->choice[0]) break;
         }
         if (steps == 5 && acc >= step_ms) acc = 0;
+        if (is_game && cfg->engine_nav) {                                /* the engine drives the page's menus with the pad */
+            int now[A_COUNT];
+            for (int a = 0; a < A_COUNT; a++) now[a] = input_down(in, a, 0);
+            if (nat->ov_modal) {
+                const int dir_actions[2] = { A_UP, A_DOWN };
+                for (int d = 0; d < 2; d++) {
+                    int act = dir_actions[d], fire = 0;
+                    if (now[act] && !prev[act]) { fire = 1; held_for[d] = 0; hold[d] = 0.4; }
+                    else if (now[act]) { held_for[d] += elapsed / 1000.0; if (held_for[d] >= hold[d]) { fire = 1; held_for[d] = 0; hold[d] = 0.12; } }
+                    if (fire) host_overlay_nav(h, d ? "down" : "up");
+                }
+                if (now[A_A] && !prev[A_A]) host_overlay_nav(h, "a");
+                else if (now[A_B] && !prev[A_B]) host_overlay_nav(h, "b");
+            } else {
+                for (int k = 0; k < cfg->nhot; k++) {
+                    int act = pad_index(cfg->hot_action[k]);
+                    if (act >= 0 && now[act] && !prev[act]) host_overlay_hotkey(h, cfg->hot_id[k]);
+                }
+            }
+            memcpy(prev, now, sizeof prev);
+        }
         if (steps) {
             double d0 = now_ms();
             int count = canvas_take_dirty(nat, dirty, MAX_DIRTY, &surface);
             double d1 = now_ms();
+            const Surf *panel = NULL; int px = 0, py = 0, omodal = 0, ochanged = 0, ovis = 0;
+            if (is_game && surface) ovis = overlay_get(nat, &panel, &px, &py, &omodal, &ochanged, NULL);
+            if (ovis || ov_prev_visible) {
+                if (count || ochanged || ovis != ov_prev_visible) {
+                    if (ovis) {
+                        compose_overlay(&composed, surface, panel, px, py);
+                        IRect all = { 0, 0, composed.w, composed.h };
+                        dirty[0] = all; display_present(disp, &composed, dirty, 1, 1);
+                    } else { IRect all = { 0, 0, surface->w, surface->h }; dirty[0] = all; display_present(disp, surface, dirty, 1, 1); }
+                }
+                ov_prev_visible = ovis;
+            } else
             if (count && surface) display_present(disp, surface, dirty, count, 0);
             double d2 = now_ms();
             t_draw += d1 - d0; t_present += d2 - d1;
@@ -163,6 +212,7 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
         if (spare > 1.0) sdl.Delay((Uint32)(spare - 0.5));
         else sdl.Delay(0);
     }
+    free(composed.px);
     if (is_game) sg_log("info", "game left after %ld frames", all_frames);
     return result;
 }
@@ -267,6 +317,7 @@ int main(int argc, char **argv) {
     }
     Host *h = host_create(game, save);
     if (host_load_page(h, "index.html") != 0) return 1;
+    host_enable_overlay(h);
     PadEvent *events;
     int nev = parse_script(script, frames, &events);
     unsigned mask = 0;
@@ -280,7 +331,12 @@ int main(int argc, char **argv) {
         host_tick(h, 1.0 / hz);
         canvas_take_dirty(host_natives(h), dirty, MAX_DIRTY, &surface);
     }
-    if (shot && surface) write_png(shot, surface);
+    if (shot && surface) {
+        const Surf *panel = NULL; int px, py, md, ch;
+        Surf comp = { 0, 0, NULL, 0 };
+        if (overlay_get(host_natives(h), &panel, &px, &py, &md, &ch, NULL)) { compose_overlay(&comp, surface, panel, px, py); write_png(shot, &comp); free(comp.px); }
+        else write_png(shot, surface);
+    }
     long ops, replayed, skipped, fr;
     canvas_stats(host_natives(h), &ops, &replayed, &skipped, &fr);
     fprintf(stderr, "frames %d, js errors %d, ops/frame %ld, replayed/frame %ld, skipped %ld\n", frames, host_error_count(h), ops / (fr ? fr : 1), replayed / (fr ? fr : 1), skipped);

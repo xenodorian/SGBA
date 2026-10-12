@@ -958,6 +958,39 @@ int canvas_take_dirty(Natives *n, IRect *out, int max, const Surf **surface) {
     return count;
 }
 
+const Surf *canvas_surface(Natives *n, int id) { Canvas *c = cv_get(n, id); return c ? c->surf : NULL; }
+
+/* ---- the HTML overlay: shell/overlay.js lays the page's menus out on a panel canvas; the runtime draws it over the game ---- */
+NATIVE(n_overlay_set) {
+    Natives *n = NAT();
+    int cid = js_arg_i(ctx, argv, 0);
+    n->ov_cid = cid;
+    n->ov_x = js_arg_i(ctx, argv, 1); n->ov_y = js_arg_i(ctx, argv, 2); n->ov_w = js_arg_i(ctx, argv, 3); n->ov_h = js_arg_i(ctx, argv, 4);
+    n->ov_changed = 1;
+    return JS_UNDEFINED;
+}
+NATIVE(n_overlay_modal) { Natives *n = NAT(); int m = js_arg_i(ctx, argv, 0); if (m != n->ov_modal) { n->ov_modal = m; } return JS_UNDEFINED; }
+NATIVE(n_measure_h) {
+    Natives *n = NAT(); Canvas *c = cv_get(n, js_arg_i(ctx, argv, 0)); if (!c) return JS_UNDEFINED;
+    int h = 0;
+    text_size("Ag", font_px_of(&c->s), c->s.bold, c->s.italic, &h);
+    return JS_NewInt32(ctx, h);
+}
+
+int overlay_get(Natives *n, const Surf **panel, int *x, int *y, int *modal, int *changed, int *was_visible) {
+    static int last_visible = 0;
+    int visible = n->ov_cid >= 0 && n->ov_w > 0 && n->ov_h > 0;
+    *changed = n->ov_changed || visible != last_visible;
+    if (was_visible) *was_visible = last_visible;
+    last_visible = visible;
+    n->ov_changed = 0;
+    *modal = n->ov_modal;
+    if (!visible) return 0;
+    *panel = canvas_surface(n, n->ov_cid);
+    *x = n->ov_x; *y = n->ov_y;
+    return *panel != NULL;
+}
+
 void canvas_force_full(Natives *n) { Canvas *c = cv_get(n, n->main_id); if (c) c->force_full = 1; }
 
 int canvas_main_size(Natives *n, int *w, int *h) {
@@ -1241,6 +1274,8 @@ void canvas_register(Host *h, Natives *n, JSContext *ctx) {
     REG("__py_save", n_save, 1); REG("__py_restore", n_restore, 1); REG("__py_drawImage", n_drawImage, 3);
     REG("__py_measure", n_measure, 2); REG("__py_getimage", n_getimage, 5); REG("__py_putimage", n_putimage, 6);
     REG("__py_group_begin", n_group_begin, 2); REG("__py_group_end", n_group_end, 1);
+    REG("__sgba_overlay_set", n_overlay_set, 5); REG("__sgba_overlay_modal", n_overlay_modal, 1); REG("__py_measure_h", n_measure_h, 1);
+    n->ov_cid = -1;
 #undef REG
     JS_FreeValue(ctx, g);
 }

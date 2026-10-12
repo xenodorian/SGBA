@@ -1,6 +1,7 @@
 #ifndef NATIVES_H
 #define NATIVES_H
 #include "sgba.h"
+#include "raster.h"
 
 typedef struct Canvas Canvas;
 typedef struct ImageStore ImageStore;
@@ -24,12 +25,15 @@ typedef struct Natives {
     KV *kv;
     int kv_count, kv_cap;
     int storage_dirty;
+    /* the HTML overlay panel (menus drawn by shell/overlay.js) */
+    int ov_cid, ov_x, ov_y, ov_w, ov_h, ov_modal, ov_changed;
     /* images announced by the page, decoded one per tick */
     int *preload;
     int preload_count, preload_cap;
 } Natives;
 
 Natives *host_natives(Host *h);
+const Surf *canvas_surface(Natives *n, int id);
 void natives_init(Host *h, Natives *n, const char *save_path);
 void natives_shutdown(Host *h, Natives *n);
 void natives_page_loaded(Host *h, Natives *n);

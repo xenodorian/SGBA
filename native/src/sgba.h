@@ -25,6 +25,11 @@ typedef struct {
     char **preload;          /* glob patterns */
     int npreload;
     char *title;
+    int engine_nav;          /* "navigation": "engine" (default) draws and drives the page's menus; "game" only draws them */
+    char **hide;             /* selectors or text:Label of on-screen buttons to hide on a device */
+    int nhide;
+    char **hot_action, **hot_id;     /* pad action -> element id pressed when no menu is open */
+    int nhot;
 } Config;
 void config_load(const char *root, Config *c);
 void config_free(Config *c);
@@ -63,6 +68,10 @@ typedef struct {
 extern App *g_app;
 void shell_register(JSContext *ctx);
 int host_load_html_text(Host *h, const char *html);
+void host_enable_overlay(Host *h);                /* HTML menus over the canvas */
+int host_overlay_tick_exists(Host *h);
+void host_overlay_nav(Host *h, const char *what);
+void host_overlay_hotkey(Host *h, const char *id);
 
 /* natives registered into the JS context (natives_*.c) */
 void natives_register(Host *h, JSContext *ctx);

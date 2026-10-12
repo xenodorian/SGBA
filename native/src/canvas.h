@@ -8,6 +8,8 @@
    *surface is the main canvas pixels (ARGB, opaque). */
 int canvas_take_dirty(Natives *n, IRect *out, int max, const Surf **surface);
 void canvas_force_full(Natives *n);
+/* The overlay panel to draw over the game: returns 1 when visible. *changed is set when it appeared, vanished or was redrawn. */
+int overlay_get(Natives *n, const Surf **panel, int *x, int *y, int *modal, int *changed, int *was_visible);
 int canvas_main_size(Natives *n, int *w, int *h);
 void canvas_stats(Natives *n, long *ops, long *replayed, long *skipped, long *frames);
 #endif

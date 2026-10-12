@@ -130,7 +130,7 @@ char *sg_exe_dir(const char *argv0) {
 
 void config_load(const char *root, Config *c) {
     memset(c, 0, sizeof *c);
-    c->fps = 60; c->image_budget_mb = 96;
+    c->fps = 60; c->image_budget_mb = 96; c->engine_nav = 1;
     char path[2048];
     snprintf(path, sizeof path, "%s/sgba_ui.json", root);
     char *text = (char *)sg_read_file(path, NULL);
@@ -146,9 +146,22 @@ void config_load(const char *root, Config *c) {
         c->preload = calloc((size_t)pre->count + 1, sizeof(char *));
         for (int i = 0; i < pre->count; i++) if (pre->items[i]->type == J_STR) c->preload[c->npreload++] = strdup(pre->items[i]->str);
     }
+    c->engine_nav = strcmp(json_str(json_get(r, "navigation"), "engine"), "game") != 0 && strcmp(json_str(json_get(r, "navigation"), "engine"), "off") != 0;
+    JNode *hide = json_get(r, "hide");
+    if (hide && hide->type == J_ARR) { c->hide = calloc((size_t)hide->count + 1, sizeof(char *)); for (int i = 0; i < hide->count; i++) if (hide->items[i]->type == J_STR) c->hide[c->nhide++] = strdup(hide->items[i]->str); }
+    JNode *hot = json_get(r, "hotkeys");
+    if (hot && hot->type == J_OBJ) {
+        c->hot_action = calloc((size_t)hot->count + 1, sizeof(char *)); c->hot_id = calloc((size_t)hot->count + 1, sizeof(char *));
+        for (int i = 0; i < hot->count; i++) if (hot->items[i]->type == J_STR) { c->hot_action[c->nhot] = strdup(hot->keys[i]); c->hot_id[c->nhot] = strdup(hot->items[i]->str); c->nhot++; }
+    }
     const char *title = json_str(json_get(r, "title"), NULL);
     if (title) c->title = strdup(title);
     json_free(r);
 }
 
-void config_free(Config *c) { for (int i = 0; i < c->npreload; i++) free(c->preload[i]); free(c->preload); free(c->title); }
+void config_free(Config *c) {
+    for (int i = 0; i < c->npreload; i++) free(c->preload[i]);
+    for (int i = 0; i < c->nhide; i++) free(c->hide[i]);
+    for (int i = 0; i < c->nhot; i++) { free(c->hot_action[i]); free(c->hot_id[i]); }
+    free(c->preload); free(c->hide); free(c->hot_action); free(c->hot_id); free(c->title);
+}
