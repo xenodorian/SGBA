@@ -20,6 +20,17 @@ import pygame
 
 from sgba_gfx import LRUBytes, fade
 
+def mult_ready(tile):
+    """Bake per-pixel alpha into an opaque tile so BLEND_RGB_MULT honors it (c' = 255 - (255 - c) * a)."""
+    base = pygame.Surface(tile.get_size())
+    if pygame.display.get_surface() is not None:
+        base = base.convert()
+    base.fill((255, 255, 255))
+    base.blit(tile, (0, 0))
+    return base
+
+
+MULT = pygame.BLEND_RGB_MULT
 COMPOSITE_FLAGS = {"lighter": pygame.BLEND_RGB_ADD, "multiply": pygame.BLEND_RGB_MULT}
 MAX_DIRTY_RECTS = 6
 FULL_REDRAW_FRACTION = 0.6
@@ -434,11 +445,20 @@ class Canvas2D:
 
             def draw_gradient(surface, rect=rect, style=style, alpha=alpha, flags=flags):
                 tile = host.gradient_tile(rect.size, rect.topleft, style, alpha)
+                if flags == MULT:
+                    tile = mult_ready(tile)
                 surface.blit(tile, rect.topleft, special_flags=flags)
                 return "alpha"
             self.emit(("G", tuple(rect), style, alpha, flags), rect, draw_gradient)
             return
         r, g, b, a = self._color(style)
+        if self.s["comp"] == "source-in":
+            def draw_source_in(surface, rect=rect, r=r, g=g, b=b, a=a):
+                surface.fill((0, 0, 0, a), rect, pygame.BLEND_RGBA_MULT)    # keep only where the canvas already has pixels
+                surface.fill((r, g, b, 0), rect, pygame.BLEND_RGBA_ADD)
+                return "alpha"
+            self.emit(("SI", tuple(rect), r, g, b, a), rect, draw_source_in)
+            return
         if a <= 0:
             return
         covers = a >= 255 and not flags
@@ -448,6 +468,8 @@ class Canvas2D:
                 surface.fill((r, g, b), rect)
                 return "fill"
             tile = host.solid_tile(rect.size, (r, g, b, a))
+            if flags == MULT:
+                tile = mult_ready(tile)
             surface.blit(tile, rect.topleft, special_flags=flags)
             return "alpha"
         self.emit(("F", tuple(rect), r, g, b, a, flags), rect, draw_solid, covers)
@@ -576,6 +598,8 @@ class Canvas2D:
                 return "fill"
             tile = pygame.Surface((w, h), pygame.SRCALPHA)
             pygame.draw.polygon(tile, color, local)
+            if flags == MULT:
+                tile = mult_ready(tile)
             surface.blit(tile, (left, top), special_flags=flags)
             return "alpha"
         self.emit(("P", qpts, color, flags), pygame.Rect(left, top, w, h), draw)
@@ -603,6 +627,8 @@ class Canvas2D:
                 return "fill"
             tile = pygame.Surface((w, h), pygame.SRCALPHA)
             pygame.draw.lines(tile, color, closed, [(x - left, y - top) for x, y in qpts], width)
+            if flags == MULT:
+                tile = mult_ready(tile)
             surface.blit(tile, (left, top), special_flags=flags)
             return "alpha"
         self.emit(("L", qpts, closed, color, width, flags), pygame.Rect(left, top, w, h), draw)
@@ -670,6 +696,9 @@ class Canvas2D:
                 return "alpha" if (alpha < 255 or host.source_kind(src_id) == "alpha") else host.source_kind(src_id)
             self.emit(("I", src_id, version, sx, sy, sw, sh, left, top, width, height, flip_x, flip_y, alpha, flags), box, draw, covers)
             return
+        if m[1] == 0 and m[2] != 0 and m[0] != 0 and m[3] != 0:
+            self._draw_sheared(src_id, version, (sx, sy, sw, sh), (dx, dy, dw, dh), alpha, flags)
+            return
         # rotated or skewed: rotate around the destination centre
         sx_scale = math.hypot(m[0], m[1])
         sy_scale = math.hypot(m[2], m[3])
@@ -691,6 +720,40 @@ class Canvas2D:
             surface.blit(piece, piece.get_rect(center=(cx, cy)), special_flags=flags)
             return "alpha"
         self.emit(("R", src_id, version, sx, sy, sw, sh, target, mirrored, qangle, round(cx), round(cy), alpha, flags), box, draw_rotated)
+
+    def _draw_sheared(self, src_id, version, src, dst, alpha, flags) -> None:
+        """Horizontal shear (x' = a*x + c*y, y' = d*y), e.g. cast shadows: shift each row of the scaled image."""
+        host = self.host
+        a, _b, c, d, e, f = self.s["m"]
+        dx, dy, dw, dh = dst
+        w, h = max(1, round(abs(a * dw))), max(1, round(abs(d * dh)))
+        if w > 2048 or h > 2048:
+            return
+        step = round(c * 64)                     # shear quantized to 1/64 px per row
+        ys = [dy + (r + 0.5) * dh / h for r in range(h)] if d > 0 else [dy + dh - (r + 0.5) * dh / h for r in range(h)]
+        xs = [c * y for y in ys]
+        left_x = (a * dx if a > 0 else a * (dx + dw)) + e
+        lo, hi = min(xs), max(xs)
+        left = math.floor(left_x + lo)
+        top = round(min(d * dy, d * (dy + dh)) + f)
+        span = math.ceil(hi - lo) + 1
+        box = pygame.Rect(left, top, w + span, h)
+
+        def draw(surface, src_id=src_id, src=src, w=w, h=h, a=a, d=d, step=step, alpha=alpha, flags=flags, version=version,
+                 left=left, top=top, rel=[x - lo for x in xs]):
+            image = host.source_surface(src_id)
+            if image is None:
+                return
+            def build():
+                base = host.variant(src_id, image, src, (w, h), a < 0, d < 0)
+                piece = pygame.Surface((w + span, h), pygame.SRCALPHA)
+                for r in range(h):
+                    piece.blit(base, (round(rel[r]), r), pygame.Rect(0, r, w, 1))
+                return fade(piece, alpha) if alpha < 255 else piece
+            piece = host.rotated(("shear", src_id, version, src, w, h, a < 0, d < 0, step, span, alpha >> 3, round(hi - lo)), build)
+            surface.blit(piece, (left, top), special_flags=flags)
+            return "alpha"
+        self.emit(("H", src_id, version, src, w, h, left, top, step, alpha, flags), box, draw)
 
     # ------------------------------------------------------------ text
     def measure(self, text: str) -> float:
