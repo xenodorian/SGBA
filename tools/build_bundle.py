@@ -278,7 +278,7 @@ def stage_web_game(source: Path, destination: Path, name: str, ui_config: Path |
 
 
 def build(target: str, cache: Path, out_dir: Path, web: Path | None = None, name: str | None = None,
-          ui_config: Path | None = None, excludes: tuple = ()) -> Path:
+          ui_config: Path | None = None, excludes: tuple = (), controls: Path | None = None) -> Path:
     pins = TARGETS[target]
     game_name = name or "SGBA"
     game_id = slug(game_name)
@@ -311,6 +311,11 @@ def build(target: str, cache: Path, out_dir: Path, web: Path | None = None, name
 
     for name in RUNTIME_FILES:
         shutil.copy2(ROOT / name, app / name)
+    if controls is not None:                 # default pad mapping for this target; the player can still redo it from the pause menu
+        data = json.loads(controls.read_text(encoding="utf-8"))
+        if not isinstance(data.get("bindings"), dict) or not data["bindings"]:
+            raise SystemExit(f"{controls} is not a valid controls file")
+        shutil.copy2(controls, app / "controls.json")
     games = app / "games"
     games.mkdir()
     game_arg = ""
@@ -356,10 +361,11 @@ def main() -> int:
     parser.add_argument("--web", type=Path, help="Folder of a browser game (index.html) to ship as the only game, started directly")
     parser.add_argument("--name", help="Game name: used for the launcher file and the Ports list entry")
     parser.add_argument("--ui-config", type=Path, help="sgba_ui.json with this game's SGBA settings (overrides one inside the folder)")
+    parser.add_argument("--controls", type=Path, help="controls.json to ship as the default pad mapping")
     parser.add_argument("--exclude", action="append", default=[], help="Glob of game files to leave out, e.g. '*.mp3' (repeatable)")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    archive = build(args.target, args.cache, args.out, args.web, args.name, args.ui_config, tuple(args.exclude))
+    archive = build(args.target, args.cache, args.out, args.web, args.name, args.ui_config, tuple(args.exclude), args.controls)
     print(f"built {archive} ({archive.stat().st_size / 1e6:.1f} MB)")
     return 0
 
