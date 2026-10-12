@@ -107,6 +107,20 @@ def main() -> int:
         inputs.consume_edges()
         game.draw(surface)
         times.append((time.process_time() - t) * 1000)
+    if os.environ.get("SGBA_BENCH_OPS"):
+        import pygame as _pg
+        probe = _pg.Rect(*[int(v) for v in os.environ["SGBA_BENCH_OPS"].split(",")])
+        main = game.host.canvases[game.host.main_id]
+        for op in (main.prev or []):
+            if op.box.colliderect(probe) and not (op.box.w >= 600 and op.box.h >= 400 and False):
+                print("OP", str(op.sig)[:150], tuple(op.box), "clip", tuple(op.clip) if op.clip else None, "covers", op.covers)
+    if os.environ.get("SGBA_BENCH_SID"):
+        sid = int(os.environ["SGBA_BENCH_SID"])
+        im = game.host.images.get(sid)
+        print("SID", sid, game.host.images.kind(sid), im.get_size(), im.get_flags() & 0xFFFF, im.get_colorkey(), im.get_bitsize())
+        f = sgba_js.fade(im, 153) if hasattr(sgba_js, "fade") else None
+        if f is not None:
+            print("FADE", f.get_at((0, 0)), f.get_at((80, 30)), im.get_at((0, 0)))
     if args.shot:
         pygame.image.save(surface, str(args.shot))
     times = times[args.skip:] or times

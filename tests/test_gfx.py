@@ -417,3 +417,17 @@ class AudioTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FadeKeyedTests(unittest.TestCase):
+    def test_fade_keeps_colorkey_transparency_after_rle_blit(self):
+        pygame.init()
+        screen = pygame.display.set_mode((64, 64))
+        keyed = pygame.Surface((8, 8), 0, 32)
+        keyed.fill((255, 0, 255))
+        keyed.fill((10, 200, 30), (2, 2, 4, 4))
+        keyed.set_colorkey((255, 0, 255), pygame.RLEACCEL)
+        screen.blit(keyed, (0, 0))                     # compresses the surface
+        faded = sgba_gfx.fade(keyed.subsurface(pygame.Rect(0, 0, 8, 8)), 120)
+        self.assertEqual(faded.get_at((0, 0)).a, 0)
+        self.assertEqual(faded.get_at((3, 3)).a, 120)

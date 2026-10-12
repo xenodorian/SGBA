@@ -44,9 +44,14 @@ class Stats:
 def fade(surface: pygame.Surface, alpha: int) -> pygame.Surface:
     """A copy whose opacity is baked into its pixels. Blitting a surface that has both per-pixel alpha and a separate
     surface alpha is several times slower than blitting one with the fade already applied."""
-    faded = surface.convert_alpha()
-    if faded is surface:
-        faded = surface.copy()
+    if surface.get_colorkey() is not None and not surface.get_flags() & pygame.SRCALPHA:
+        # convert_alpha() loses the colorkey of an RLE-compressed surface (its keyed pixels turn solid), so go through a blit
+        faded = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        faded.blit(surface, (0, 0))
+    else:
+        faded = surface.convert_alpha()
+        if faded is surface:
+            faded = surface.copy()
     faded.fill((255, 255, 255, max(0, min(255, alpha))), special_flags=pygame.BLEND_RGBA_MULT)
     return faded
 
