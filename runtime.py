@@ -576,6 +576,8 @@ def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size:
     "done" or "closed".
     """
     update = getattr(game, "update", None)
+    step_hz = max(10, min(SIMULATION_HZ, int(getattr(game, "step_hz", SIMULATION_HZ))))   # a game on slow hardware may step at 30
+    step_dt = 1.0 / step_hz
     retained = bool(getattr(game, "retained", False))
     depth = int(getattr(game, "surface_depth", 32))
     logical = pygame.Surface(logical_size, 0, depth)
@@ -617,20 +619,20 @@ def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size:
                 resume()
             continue
 
-        elapsed = min(clock.tick(SIMULATION_HZ) / 1000.0, MAX_FRAME_TIME)
-        accumulator = min(accumulator + elapsed, FIXED_DT * MAX_CATCH_UP_STEPS)
+        elapsed = min(clock.tick(step_hz) / 1000.0, MAX_FRAME_TIME)
+        accumulator = min(accumulator + elapsed, step_dt * MAX_CATCH_UP_STEPS)
         first_update = True
         steps = 0
-        while accumulator >= FIXED_DT and steps < MAX_CATCH_UP_STEPS:
+        while accumulator >= step_dt and steps < MAX_CATCH_UP_STEPS:
             if callable(update):
-                update(FIXED_DT, inputs)
+                update(step_dt, inputs)
             if first_update:
                 inputs.consume_edges()
                 first_update = False
-            accumulator -= FIXED_DT
+            accumulator -= step_dt
             steps += 1
-        if steps == MAX_CATCH_UP_STEPS and accumulator >= FIXED_DT:
-            accumulator %= FIXED_DT
+        if steps == MAX_CATCH_UP_STEPS and accumulator >= step_dt:
+            accumulator %= step_dt
         if getattr(game, "finished", False):
             return "done"
 

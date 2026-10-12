@@ -103,7 +103,7 @@ def main() -> int:
         for action, down in by_frame.get(frame, []):
             inputs._set(action, ("bench",), down)
         t = time.process_time()
-        game.update(1 / 60, inputs)
+        game.update(1 / getattr(game, "step_hz", 60), inputs)
         inputs.consume_edges()
         game.draw(surface)
         times.append((time.process_time() - t) * 1000)

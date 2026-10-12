@@ -549,6 +549,10 @@ class JSGame:
         root = Path(root)
         save_path = (save_dir or root) / "localStorage.json" if save_dir is not None else None
         self.config = self._load_config(root)
+        try:
+            self.step_hz = max(10, min(60, int(self.config.get("fps", 60))))     # simulation rate: 30 halves the work on a slow handheld
+        except (TypeError, ValueError):
+            self.step_hz = 60
         self.host = JSHost(root, save_path=save_path, log=log, depth=self.config["color_depth"],
                            image_budget_mb=self.config["image_budget_mb"], alpha_mode=self.config["alpha"],
                            image_depth=self.config["image_depth"], rle=self.config["rle"])
@@ -583,7 +587,7 @@ class JSGame:
     @staticmethod
     def _load_config(root: Path) -> dict:
         config = {"navigation": "engine", "hotkeys": {}, "color_depth": 32, "image_depth": 32, "rle": True,
-                  "image_budget_mb": 96, "alpha": "threshold", "preload": [], "hide": [], "title": None}
+                  "image_budget_mb": 96, "alpha": "threshold", "preload": [], "hide": [], "title": None, "fps": 60}
         path = root / "sgba_ui.json"
         if path.is_file():
             try:
