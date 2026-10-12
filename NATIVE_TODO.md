@@ -35,9 +35,9 @@ pushing and noting after each.
 
 ## D. Later, after the emulator work (game changes, from the owner)
 
-- [ ] D1. Intro (story) scenes: draw only the background that belongs to the scene, fitted to the screen. Today the title scene
+- [x] D1. Intro (story) scenes: draw only the background that belongs to the scene, fitted to the screen. Today the title scene
       shows behind it, so two backgrounds appear (a story picture on the top part and the title background below).
-- [ ] D2. Intro scenes: show only one Perry. Today the title Perry and the story's Perry are both drawn.
+- [x] D2. Intro scenes: show only one Perry. Today the title Perry and the story's Perry are both drawn.
       (Both seen in the web build and on SGBA; fix in the game files, then bump the cache stamp.)
 
 ## Notes

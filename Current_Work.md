@@ -165,3 +165,7 @@ The plan and checklist are in `NATIVE_TODO.md`. Entries below are dated notes as
 - Checked: aarch64 binary under QEMU gives a byte-identical screenshot to the x86_64 build; the full bundle starts under QEMU with the shipped SDL and draws the title.
 - NOT checked: nothing has run on the real R36S yet (video driver, pad, sound, real speed), and sgba.exe has not been run (no Windows or wine here; it links and the code paths are the same as Linux apart from LoadLibrary and the thread call).
 - Next: owner test of the native bundle on the R36S; C1/C2 (retire Python) only on the owner's word. Later game tasks: D1, D2.
+
+2026-10-12: D1 and D2 done (BibooSGBA st177)
+- Cause: the story pictures are 216 px tall panoramas but were drawn at the top of the 480 px canvas without clearing, so the title scene (and its Perry) showed below. drawStoryBg in game/18_story.js now clears and stretches the 384x216 view of the picture over the whole 640x480, the mapping the Perry and twin placements already use.
+- The fire and double pages still show Perry and the red twin together; that is the story (the figure on the lawn, the Double), not the leak.
