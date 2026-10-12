@@ -103,6 +103,7 @@ class JSHost:
         self.dirty: list = []
         self.first_frame = True
         self.audio = sgba_audio.AudioEngine(self.root, self.log_fn)
+        self.preload_queue: list = []
         self.ctx = quickjs.Context()
         self.ctx.set_memory_limit(96 * 1024 * 1024)
         self.ctx.set_max_stack_size(2 * 1024 * 1024)
@@ -124,6 +125,7 @@ class JSHost:
         add("__py_getimage", lambda cid, x, y, w, h: self.canvases[int(cid)].get_image_hex(int(x), int(y), int(w), int(h)))
         add("__py_putimage", lambda cid, x, y, w, h, s: self.canvases[int(cid)].put_image_hex(int(x), int(y), int(w), int(h), str(s)))
         add("__py_load_image", self._load_image)
+        add("__py_preload", self._queue_preload)
         add("__py_storage", self._storage_op)
         add("__py_read_text", self._read_text)
         add("__py_stat", self._stat)
@@ -329,6 +331,26 @@ class JSHost:
             self.log_fn("warn", f"image failed: {src[:80]}")
             return "-1,0,0"
 
+    def _queue_preload(self, urls_json) -> None:
+        """A game announces images it is about to need; they are decoded one per frame, ahead of the first draw."""
+        try:
+            urls = json.loads(str(urls_json))
+        except ValueError:
+            return
+        for url in urls:
+            path = self._resolve(str(url))
+            result = self.images.register_file(path) if path is not None else None
+            if result is not None and result[0] not in self.preload_queue:
+                self.preload_queue.append(result[0])
+
+    def _preload_step(self) -> None:
+        while self.preload_queue:
+            sid = self.preload_queue.pop(0)
+            entry = self.images.entries.get(sid)
+            if entry is not None and entry["surface"] is None:
+                self.images.get(sid)
+                return
+
     # -- storage
     def _load_storage(self) -> dict:
         if self.save_path and self.save_path.is_file():
@@ -442,6 +464,7 @@ class JSHost:
             self.errors += 1
             self.log_fn("error", f"frame: {exc}")
         self.pump()
+        self._preload_step()
         self.audio.update()
         self.stats.frames += 1
         if self._storage_dirty:

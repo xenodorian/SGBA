@@ -506,6 +506,7 @@
     getGamepads: () => pads, vibrate: () => false, clipboard: { writeText: () => Promise.resolve() }, serviceWorker: undefined,
     mediaDevices: undefined, getBattery: () => Promise.resolve({ level: 1, charging: true }) };
   g.__sgba_set_pads = (list) => { pads = list; };
+  g.SGBA = { preload: (list) => { try { g.__py_preload(JSON.stringify(list)); } catch (e) {} } };
 
   // ---- storage
   class Storage {
