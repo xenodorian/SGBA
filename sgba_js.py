@@ -24,7 +24,7 @@ import pygame
 
 import sgba_audio
 import sgba_js_ui
-from sgba_canvas import Canvas2D, gradient_surface
+from sgba_canvas import Canvas2D, gradient_surface, mult_ready
 from sgba_gfx import ImageStore, LRUBytes, Stats, fade
 
 try:
@@ -253,23 +253,27 @@ class JSHost:
             image = self.tiles.put(key, image)
         return image
 
-    def solid_tile(self, size, rgba) -> pygame.Surface:
-        key = ("solid", tuple(size), rgba)
+    def solid_tile(self, size, rgba, mult: bool = False) -> pygame.Surface:
+        key = ("solid", tuple(size), rgba, mult)
         tile = self.tiles.get(key)
         if tile is None:
             tile = pygame.Surface(size, pygame.SRCALPHA)
             tile.fill(rgba)
+            if mult:
+                tile = mult_ready(tile)
             tile = self.tiles.put(key, tile)
         return tile
 
-    def gradient_tile(self, size, origin, style, alpha: float = 1.0) -> pygame.Surface:
+    def gradient_tile(self, size, origin, style, alpha: float = 1.0, mult: bool = False) -> pygame.Surface:
         level = int(round(alpha * 255)) >> 3 << 3
-        key = ("grad", tuple(size), tuple(origin), style, level)
+        key = ("grad", tuple(size), tuple(origin), style, level, mult)
         tile = self.tiles.get(key)
         if tile is None:
             tile = gradient_surface(tuple(size), tuple(origin), style).convert_alpha()
             if level < 248:
                 tile = fade(tile, level or 8)
+            if mult:
+                tile = mult_ready(tile)
             tile = self.tiles.put(key, tile)
         return tile
 

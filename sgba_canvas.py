@@ -444,9 +444,7 @@ class Canvas2D:
             alpha = self.s["alpha"]
 
             def draw_gradient(surface, rect=rect, style=style, alpha=alpha, flags=flags):
-                tile = host.gradient_tile(rect.size, rect.topleft, style, alpha)
-                if flags == MULT:
-                    tile = mult_ready(tile)
+                tile = host.gradient_tile(rect.size, rect.topleft, style, alpha, flags == MULT)
                 surface.blit(tile, rect.topleft, special_flags=flags)
                 return "alpha"
             self.emit(("G", tuple(rect), style, alpha, flags), rect, draw_gradient)
@@ -467,9 +465,7 @@ class Canvas2D:
             if a >= 255 and not flags:
                 surface.fill((r, g, b), rect)
                 return "fill"
-            tile = host.solid_tile(rect.size, (r, g, b, a))
-            if flags == MULT:
-                tile = mult_ready(tile)
+            tile = host.solid_tile(rect.size, (r, g, b, a), flags == MULT)
             surface.blit(tile, rect.topleft, special_flags=flags)
             return "alpha"
         self.emit(("F", tuple(rect), r, g, b, a, flags), rect, draw_solid, covers)
