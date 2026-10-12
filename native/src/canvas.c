@@ -973,7 +973,12 @@ NATIVE(n_overlay_modal) { Natives *n = NAT(); int m = js_arg_i(ctx, argv, 0); if
 NATIVE(n_measure_h) {
     Natives *n = NAT(); Canvas *c = cv_get(n, js_arg_i(ctx, argv, 0)); if (!c) return JS_UNDEFINED;
     int h = 0;
-    text_size("Ag", font_px_of(&c->s), c->s.bold, c->s.italic, &h);
+    if (js_arg_i(ctx, argv, 1)) {                                                                    /* size()[1] of this text */
+        const char *t = JS_ToCString(ctx, argv[2]);
+        text_size(t ? t : "", font_px_of(&c->s), c->s.bold, c->s.italic, &h);
+        if (t) JS_FreeCString(ctx, t);
+    }
+    else h = text_font_height(font_px_of(&c->s));                                                    /* get_height() */
     return JS_NewInt32(ctx, h);
 }
 

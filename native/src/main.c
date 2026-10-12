@@ -164,6 +164,7 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
             int now[A_COUNT];
             for (int a = 0; a < A_COUNT; a++) now[a] = input_down(in, a, 0);
             if (nat->ov_modal) {
+                host_overlay_nav(h, "ensure");
                 const int dir_actions[2] = { A_UP, A_DOWN };
                 for (int d = 0; d < 2; d++) {
                     int act = dir_actions[d], fire = 0;
@@ -283,7 +284,7 @@ int main(int argc, char **argv) {
     const char *game = NULL, *save = NULL, *script = "9999:a", *shot = NULL;
     int frames = 0, njs = 0, fullscreen = 0;
     double seconds = 0;
-    double hz = 60.0;
+    double hz = 0;
     JsAt js[64];
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = atoi(argv[++i]);
@@ -318,6 +319,7 @@ int main(int argc, char **argv) {
     Host *h = host_create(game, save);
     if (host_load_page(h, "index.html") != 0) return 1;
     host_enable_overlay(h);
+    if (hz <= 0) hz = host_config(h)->fps;
     PadEvent *events;
     int nev = parse_script(script, frames, &events);
     unsigned mask = 0;

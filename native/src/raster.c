@@ -237,9 +237,10 @@ void r_poly(Surf *d, const float *pts, int n, uint32_t color, int comp, IRect cl
 
 static void line_seg(Surf *d, int x0, int y0, int x1, int y1, int width, uint32_t color, int comp, IRect clip) {
     int dx = abs(x1 - x0), dy = abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy;
-    int half = width / 2;
+    int half = (width - 1) / 2;
+    int xmajor = dx > dy;                  /* pygame draws a perpendicular span of `width` pixels at every step of the line */
     for (;;) {
-        IRect r = irect_clip(irect(x0 - half, y0 - half, width, width), clip);
+        IRect r = irect_clip(xmajor ? irect(x0, y0 - half, 1, width) : irect(x0 - half, y0, width, 1), clip);
         r = irect_clip(r, irect(0, 0, d->w, d->h));
         if (!irect_empty(r)) { if (comp == COMP_OVER && PA(color) >= 255) r_fill_solid(d, r, color); else r_fill_blend(d, r, color, comp); }
         if (x0 == x1 && y0 == y1) break;

@@ -151,3 +151,9 @@ The plan and checklist are in `NATIVE_TODO.md`. Entries below are dated notes as
 - native/shell/overlay.js (port of sgba_js_ui.py) lays the page's buttons out on a panel canvas; the runtime darkens the game (alpha 110) and draws the panel over it.
 - Pad navigation in "engine" mode (up/down with repeat, A click, B back, hotkeys, neutral pad to the game while a menu is open); "game" mode only draws. Config keys navigation, hotkeys, hide read from sgba_ui.json.
 - Checked on the Parry Perry start menu: panel draws, focus and clicks work. Not yet run on a real display or pad.
+
+2026-10-12: native runtime, B2 done (drawing parity with the Python canvas)
+- tools/parity.py draws the seven reference scenes (same seed, scripts and fixed step as pixel_check) with both runtimes and reports pixels that differ by more than 8 per channel; diff images in native/build/parity. Needs pygame and quickjs-ng on the PC (pip install pygame quickjs-ng).
+- Result: game scenes 0.02% to 0.13% of pixels differ (HUD and label text, a few pixels on rotating coins); title scene 2.7% (menu text). Tolerance is 3% per scene.
+- Fixes found by the comparison: headless step now follows the game's fps (30), thick lines use pygame's algorithm (crate crosses), text metrics (height, ascent, advances, descender line heights) now come from pygame's own tables (tools/gen_font_metrics.py -> native/src/fontmetrics.h) so menus lay out the same, engine navigation only forces focus in "engine" mode.
+- Still different on purpose: glyph shapes (stb_truetype against hinted SDL_ttf, pygame text looks slightly bolder), 16-bit colour of the menu panel in the Python runtime.

@@ -15,7 +15,7 @@
   const mctx = meas.getContext('2d');
   const setFont = (ctx, size, bold) => { ctx.font = (bold ? 'bold ' : '') + (size / 1.25) + 'px sans-serif'; };
   const textW = (size, bold, s) => { setFont(mctx, size, bold); return mctx.measureText(s).width; };
-  const textH = (size, bold) => { setFont(mctx, size, bold); return __py_measure_h(meas.__id); };
+  const textH = (size, bold, text) => { setFont(mctx, size, bold); return __py_measure_h(meas.__id, text === undefined ? 0 : 1, text || ''); };   // with text: pygame's size()[1] of it, else get_height()
 
   function rrect(ctx, x, y, w, h, r) {
     r = Math.min(r, w / 2, h / 2);
@@ -67,7 +67,7 @@
 
     buttonAtom(node, style, fullWidth) {
       const label = textOf(node).trim() || node.v || '';
-      const tw = textW(21, true, label), th = textH(21, true);
+      const tw = textW(21, true, label), th = textH(21, true, label);
       const w = fullWidth || (tw + 28), h = th + 14;
       const primary = hasClass(node, /(^|\s)primary(\s|$)/), focus = !!node.on, disabled = !!node.d;
       return new Atom(w, h, (ctx, x, y) => {
@@ -307,12 +307,13 @@
     build(data.roots);
   }
 
-  g.__sgba_overlay_tick = () => {
-    refresh();
-    if (focusIndices.length && !focusIndices.includes(active)) { __sgba_ui_focus(defaultFocus); version = -1; refresh(); }   // an open menu always has something focused
-  };
+  g.__sgba_overlay_tick = () => { refresh(); };
   g.__sgba_overlay_nav = (what) => {
     if (!focusIndices.length) return;
+    if (what === 'ensure') {                 // engine navigation: an open menu always has something focused
+      if (!focusIndices.includes(active)) { __sgba_ui_focus(defaultFocus); version = -1; refresh(); }
+      return;
+    }
     if (what === 'up' || what === 'down') {
       const delta = what === 'down' ? 1 : -1, n = focusIndices.length;
       const pos = focusIndices.includes(active) ? focusIndices.indexOf(active) : (delta > 0 ? -1 : 0);
