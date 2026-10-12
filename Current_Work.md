@@ -39,6 +39,9 @@ Implemented: sgba_gfx.py (lazy, byte-budgeted ImageStore decoding on first use t
 Measured on the same Parry Perry gameplay script (desktop CPU, so use as relative numbers): average frame 6.5 ms -> about 4.6-5.2 ms, p95 12.8 -> 7 ms, RSS 300 MB -> 95 MB (images 240 MB -> 30 MB decoded), pixel work per frame about 6x lower, music costs ~0 MB decoded. Matrix result: a 32-bit canvas with 32-bit images and RLE for cut-outs is fastest; 16-bit saves RAM but SDL blends it slowly (full-screen translucent overlay 4.6 ms vs 0.2 ms), so 16-bit is opt-in.
 Known limits and next steps: (1) the game's own JavaScript (QuickJS, no JIT) is now about a third of frame time on desktop and unmeasured on the R36S CPU; the new perf log lines exist to measure it on the device. (2) Scrolling levels still redraw nearly the whole screen each frame (12+ parallax layers); a scroll-blit trick or a render_scale option would help if needed. (3) First draw of each image costs 10-15 ms desktop (decode); use "preload". (4) Full-screen translucent overlays/gradients are the most expensive remaining draw ops. (5) Nothing here has run on an R36S.
 
+### BibooSGBA port (owner direction, 2026-10-12)
+The Parry Perry port lives in github.com/xenodorian/BibooSGBA (main repo going forward; old xenodorian/Biboo is an untouched archive). Engine support added here: `.sgba` manifest `runtime: js`, loose web-folder games (run/list/package), `hide` and `title` in sgba_ui.json, per-game save folders, cache dir on disk (not temp RAM), single-game bundles with direct launch and a launcher override argument (tools/build_bundle.py --web/--name/--ui-config/--exclude), tools/sgba_check.py (feature scan + load test), gradient-filled canvas text. BibooSGBA's sgba/sgba.ref pins this branch (claude/epic-franklin-qljrs1) until it is merged.
+
 ## ArkOS 2 research (web, 2026-10-11)
 Source: geniot/arkos-docker installed.txt (reproduces ArkOS 2.0 developer-mode packages; not an official image listing): Ubuntu 19.10 base, python3 3.7.5, libsdl2-2.0-0 2.0.10, libc6 2.30, arm64 and armhf. No pygame package listed. Conclusion: system Python is 3.7 and pygame is probably NOT installed, so the project bundles its own Python and pygame instead of relying on the device. Developer-path floor remains Python 3.7, SDL 2.0.10. PortMaster ships its own runtimes per port rather than altering the OS. Unconfirmed: any pygame wheel for aarch64 cp37 using system SDL2 with KMSDRM video; pip availability on the device.
 
@@ -117,6 +120,7 @@ Direction (owner, 2026-10-11): no more device information is available. The runt
 - No R36S deployment or performance test has occurred.
 
 ## Change log
+- 2026-10-12: Browser-game packaging and single-game bundles for the BibooSGBA port; sgba_check; gradient text; hide/title settings; per-game saves.
 - 2026-10-11: Efficiency redesign for JS games: retained/diffed canvas with dirty-rect presentation, lazy budgeted image store, compressed streaming audio, caches, telemetry; RSS 300 -> 95 MB and faster frames on the Biboo test script; ARM bundle tests pass under qemu; not run on hardware.
 - 2026-10-11: HTML overlay buttons now pad-navigable in JS games (real DOM, overlay drawing, engine and game navigation modes, hotkeys), tests and docs. Biboo menus work in both modes; not run on hardware.
 - 2026-10-11: JS hosting spike (sgba_js.py, shim, tests, quickjs-ng in bundles). Biboo loads and renders its title screen with zero script errors; DOM menus, speed on handhelds and fidelity gaps remain.

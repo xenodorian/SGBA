@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
 import os
 import sys
@@ -18,13 +19,14 @@ SKIP_DIRS = {".git", ".venv", "__pycache__", ".pytest_cache"}
 SKIP_SUFFIXES = {".pyc", ".pyo"}
 
 
-def package_game(game_dir: Path, output_path: Path, title: str | None = None) -> Path:
+def package_game(game_dir: Path, output_path: Path, title: str | None = None, exclude: tuple = ()) -> Path:
     game_dir = game_dir.resolve()
     if not game_dir.is_dir():
         raise ValueError(f"Game folder not found: {game_dir}")
-    entry = game_dir / "main.py"
-    if not entry.is_file():
-        raise ValueError("Game folder must contain main.py")
+    runtime = "python" if (game_dir / "main.py").is_file() else "js" if (game_dir / "index.html").is_file() else None
+    if runtime is None:
+        raise ValueError("Game folder must contain main.py (Python game) or index.html (browser game)")
+    entry = game_dir / ("main.py" if runtime == "python" else "index.html")
     output_path = output_path.resolve()
     if output_path == entry or game_dir in output_path.parents:
         raise ValueError("Output package must be outside the source game folder")
@@ -38,7 +40,8 @@ def package_game(game_dir: Path, output_path: Path, title: str | None = None) ->
         "format": "sgba",
         "format_version": 1,
         "title": package_title[:80],
-        "entry_point": "main.py",
+        "entry_point": entry.name,
+        "runtime": runtime,
     }
 
     files = []
@@ -50,7 +53,9 @@ def package_game(game_dir: Path, output_path: Path, title: str | None = None) ->
         relative = path.relative_to(game_dir)
         if any(part in SKIP_DIRS for part in relative.parts) or path.suffix.lower() in SKIP_SUFFIXES:
             continue
-        if path.name == "manifest.json":
+        if any(fnmatch.fnmatch(relative.as_posix(), pattern) for pattern in exclude):
+            continue
+        if path.name == "manifest.json" and len(relative.parts) == 1:
             raise ValueError("Source game folders must not contain their own manifest.json")
         if path.stat().st_size > MAX_FILE_BYTES:
             raise ValueError(f"File exceeds 16 MiB package limit: {relative}")
@@ -81,15 +86,16 @@ def package_game(game_dir: Path, output_path: Path, title: str | None = None) ->
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Package an SGBA game folder into one .sgba file")
-    parser.add_argument("game_dir", type=Path, help="Folder containing main.py and optional game.json/assets")
+    parser.add_argument("game_dir", type=Path, help="Folder containing main.py (Python game) or index.html (browser game) and its assets")
     parser.add_argument("output", nargs="?", type=Path, help="Output .sgba path (default: <game folder>.sgba)")
     parser.add_argument("--title", help="Display title (maximum 80 characters)")
+    parser.add_argument("--exclude", action="append", default=[], help="Glob of files to leave out, e.g. '*.mp3' (repeatable)")
     args = parser.parse_args()
     output = args.output or args.game_dir.with_suffix(".sgba")
     if output.suffix.lower() != ".sgba":
         parser.error("Output filename must end in .sgba")
     try:
-        result = package_game(args.game_dir, output, args.title)
+        result = package_game(args.game_dir, output, args.title, tuple(args.exclude))
     except (OSError, ValueError, json.JSONDecodeError, zipfile.BadZipFile) as exc:
         parser.error(str(exc))
     print(result)

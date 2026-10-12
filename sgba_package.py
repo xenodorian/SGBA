@@ -48,7 +48,7 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict:
         raise PackageError(f"Cannot read package manifest: {exc}") from exc
     if not isinstance(manifest, dict):
         raise PackageError("manifest.json must contain a JSON object")
-    allowed = {"format", "format_version", "title", "entry_point"}
+    allowed = {"format", "format_version", "title", "entry_point", "runtime"}
     unknown = set(manifest) - allowed
     if unknown:
         raise PackageError(f"Unsupported manifest fields: {', '.join(sorted(unknown))}")
@@ -59,9 +59,14 @@ def _read_manifest(archive: zipfile.ZipFile) -> dict:
     title = manifest.get("title")
     if not isinstance(title, str) or not title.strip() or len(title) > 80:
         raise PackageError("manifest title must contain 1 to 80 characters")
+    runtime = manifest.get("runtime", "python")
+    if runtime not in ("python", "js"):
+        raise PackageError("manifest runtime must be 'python' or 'js'")
+    manifest["runtime"] = runtime
     entry_point = manifest.get("entry_point")
-    if entry_point != "main.py":
-        raise PackageError("manifest entry_point must be the standard root file main.py")
+    wanted = "main.py" if runtime == "python" else "index.html"
+    if entry_point != wanted:
+        raise PackageError(f"manifest entry_point must be the standard root file {wanted}")
     manifest["entry_point"] = entry_point
     return manifest
 
@@ -120,13 +125,19 @@ def validate_package(path: str | Path) -> dict:
 def resolve_game_path(path: str | Path) -> Path:
     """Return a Python entry-point path, extracting validated .sgba files to a cache."""
     game_path = Path(path).expanduser().resolve()
+    if game_path.is_dir():                         # a loose game folder: browser game or Python game
+        for entry in ("index.html", "main.py"):
+            if (game_path / entry).is_file():
+                return game_path / entry
+        raise FileNotFoundError(f"No index.html or main.py in {game_path}")
     if game_path.suffix.lower() != ".sgba":
         if not game_path.is_file():
             raise FileNotFoundError(f"Game file not found: {game_path}")
         return game_path
     manifest = validate_package(game_path)
     digest = hashlib.sha256(game_path.read_bytes()).hexdigest()
-    cache_root = Path(tempfile.gettempdir()) / "sgba-package-cache"
+    # Extracted packages live on disk, not in memory-backed temp space. SGBA_CACHE_DIR points at the SD card on a handheld.
+    cache_root = Path(os.environ.get("SGBA_CACHE_DIR") or tempfile.gettempdir()) / "sgba-package-cache"
     cache_root.mkdir(parents=True, exist_ok=True)
     target = cache_root / digest
     entry_path = target.joinpath(*PurePosixPath(manifest["entry_point"]).parts)

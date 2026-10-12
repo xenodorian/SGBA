@@ -720,7 +720,10 @@
     }
     cssCache = { text, rules }; return rules;
   };
+  let hideSelectors = [];
+  g.__sgba_set_hide = (list) => { hideSelectors = list.slice(); bump(); };
   const displayOf = (el) => {
+    if (hideSelectors.length && hideSelectors.some((sel) => (sel.startsWith('text:') ? el.localName === 'button' && el.textContent.trim().startsWith(sel.slice(5)) : matches(el, sel)))) return 'none';   // hidden for this device by sgba_ui.json
     let val = '', imp = false;
     for (const r of cssRules()) { const d = r.decl.display; if (d && (d.imp || !imp) && matches(el, r.sels)) { val = d.val; imp = d.imp; } }
     const inline = el.style.display;

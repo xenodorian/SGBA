@@ -5,7 +5,14 @@
 
 Each bundle carries its own Python and pygame, the runtime, and packaged games.
 All downloads are pinned and checked against SHA-256 before use.
-Output: dist/SGBA-<target>/ and dist/SGBA-<target>.zip
+For one browser game (a folder with index.html, such as a web game):
+
+    python tools/build_bundle.py arkos-aarch64 --web ../BibooSGBA/web --name "Parry Perry" \\
+        --ui-config ../BibooSGBA/sgba/sgba_ui.json --exclude "*.mp3" --exclude "tests/*"
+
+This ships the game as a loose folder, starts it directly (no menu), and also writes dist/<name>.sgba.
+
+Output: dist/<label>/ and dist/<label>.zip
 """
 from __future__ import annotations
 
@@ -67,13 +74,18 @@ ARKOS_LAUNCHER = r'''#!/bin/bash
 # SGBA launcher for ArkOS handhelds. Everything it needs is in the "sgba" folder next to it.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$HERE/sgba"
+ARG1="$1"
+if [ -n "$ARG1" ] && [ -e "$ARG1" ]; then ARG1="$(cd "$(dirname "$ARG1")" && pwd)/$(basename "$ARG1")"; fi
 cd "$APP" || exit 1
 PY="$APP/python/bin/python3.11"
 LOG="$APP/sgba_launch.log"
 echo "=== launch $(date) ===" >> "$LOG" 2>&1
 chmod +x "$PY" 2>/dev/null
 [ -w /dev/tty1 ] && printf '\033c' > /dev/tty1 2>/dev/null
+GAME="${ARG1:-@GAME@}"      # an optional folder or .sgba given on the command line replaces the built-in game
 export PYTHONPATH="$APP/site:$APP"
+export SGBA_SAVE_DIR="$APP/saves"
+export SGBA_CACHE_DIR="$APP/cache"
 export PYTHONNOUSERSITE=1
 export PYTHONUNBUFFERED=1
 export HOME="${HOME:-$APP}"
@@ -87,12 +99,12 @@ done
 run_python() {
   # $1 = preload library or empty
   if [ -n "$1" ]; then export LD_PRELOAD="$1"; else unset LD_PRELOAD; fi
-  if ! $SGBA_PY_PREFIX "$PY" runtime.py --fullscreen >> "$LOG" 2>&1; then
+  if ! $SGBA_PY_PREFIX "$PY" runtime.py --fullscreen ${GAME:+"$GAME"} >> "$LOG" 2>&1; then
     rc=$?
     if [ $rc -eq 126 ] || [ $rc -eq 127 ]; then
       # Could not execute the bundled python directly (no exec bit); go through the loader.
       for ld in /lib/ld-linux-aarch64.so.1 /lib64/ld-linux-aarch64.so.1; do
-        [ -x "$ld" ] && { $SGBA_PY_PREFIX "$ld" "$PY" runtime.py --fullscreen >> "$LOG" 2>&1; return $?; }
+        [ -x "$ld" ] && { $SGBA_PY_PREFIX "$ld" "$PY" runtime.py --fullscreen ${GAME:+"$GAME"} >> "$LOG" 2>&1; return $?; }
       done
     fi
     return $rc
@@ -117,14 +129,20 @@ exit 0
 WINDOWS_LAUNCHER = r'''@echo off
 rem SGBA launcher for Windows. Everything it needs is in the "sgba" folder next to it.
 set "APP=%~dp0sgba"
+set "ARG1="
+if not "%~1"=="" set "ARG1=%~f1"
 cd /d "%APP%"
 set "PYTHONPATH=%APP%\site;%APP%"
 set "PYTHONNOUSERSITE=1"
-"%APP%\python\python.exe" runtime.py
+set "SGBA_SAVE_DIR=%APP%\saves"
+set "SGBA_CACHE_DIR=%APP%\cache"
+set "GAME=@GAME@"
+if defined ARG1 set "GAME=%ARG1%"
+if defined GAME ("%APP%\python\python.exe" runtime.py "%GAME%") else ("%APP%\python\python.exe" runtime.py)
 if errorlevel 1 pause
 '''
 
-README = """SGBA
+README = """{name}
 ====
 {how}
 
@@ -135,9 +153,9 @@ If something goes wrong, check sgba.log and sgba_launch.log in the "sgba" folder
 """
 
 HOW = {
-    "arkos-aarch64": ('Copy SGBA.sh and the "sgba" folder together into your Ports folder (roms/ports)\n'
-                      'on the SD card, then start "SGBA" from the Ports list. Nothing else is needed.'),
-    "windows-x64": 'Unzip anywhere and double-click SGBA.bat. Nothing needs to be installed.',
+    "arkos-aarch64": ('Copy "{launcher}" and the "sgba" folder together into your Ports folder (roms/ports)\n'
+                      'on the SD card, then start "{name}" from the Ports list. Nothing else is needed.'),
+    "windows-x64": 'Unzip anywhere and double-click {launcher}. Nothing needs to be installed.',
 }
 
 
@@ -233,9 +251,39 @@ def deb_member(deb: bytes, wanted_prefix: str) -> bytes:
     raise SystemExit(f"{wanted_prefix} not found in deb")
 
 
-def build(target: str, cache: Path, out_dir: Path) -> Path:
+def slug(text: str) -> str:
+    return "".join(c if c.isalnum() else "-" for c in text.lower()).strip("-") or "game"
+
+
+def stage_web_game(source: Path, destination: Path, name: str, ui_config: Path | None, excludes: tuple) -> None:
+    """Copy a browser game folder for packaging, leaving out files the device does not need, and apply its SGBA settings."""
+    import fnmatch
+    source = source.resolve()
+
+    def keep(path: Path) -> bool:
+        relative = path.relative_to(source).as_posix()
+        return not any(fnmatch.fnmatch(relative, pattern) for pattern in excludes)
+
+    for path in sorted(source.rglob("*")):
+        if path.is_file() and keep(path) and ".git" not in path.relative_to(source).parts:
+            target = destination / path.relative_to(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, target)
+    settings: dict = {}
+    for candidate in (source / "sgba_ui.json", ui_config):
+        if candidate is not None and Path(candidate).is_file():
+            settings.update(json.loads(Path(candidate).read_text(encoding="utf-8")))
+    settings.setdefault("title", name)
+    (destination / "sgba_ui.json").write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+
+def build(target: str, cache: Path, out_dir: Path, web: Path | None = None, name: str | None = None,
+          ui_config: Path | None = None, excludes: tuple = ()) -> Path:
     pins = TARGETS[target]
-    bundle = out_dir / f"SGBA-{target}"
+    game_name = name or "SGBA"
+    game_id = slug(game_name)
+    label = f"{game_id}-{target}" if web else f"SGBA-{target}"
+    bundle = out_dir / label
     if bundle.exists():
         shutil.rmtree(bundle)
     app = bundle / "sgba"
@@ -265,19 +313,29 @@ def build(target: str, cache: Path, out_dir: Path) -> Path:
         shutil.copy2(ROOT / name, app / name)
     games = app / "games"
     games.mkdir()
-    for name in PACKAGED_GAMES:
-        package_game(ROOT / "games" / name, games / f"{name}.sgba")
-
-    (app / "README.txt").write_text(README.format(how=HOW[target]), encoding="utf-8")
-    if target.startswith("arkos"):
-        launcher = bundle / "SGBA.sh"
-        launcher.write_text(ARKOS_LAUNCHER, encoding="utf-8", newline="\n")
+    game_arg = ""
+    if web is not None:
+        # A single browser game: ship it as a loose folder (nothing to unpack on the device) and start it directly.
+        stage_web_game(web, games / game_id, game_name, ui_config, excludes)
+        package_game(games / game_id, out_dir / f"{game_id}.sgba", game_name)
+        game_arg = f"games/{game_id}" if target.startswith("arkos") else f"games\\{game_id}"
     else:
-        launcher = bundle / "SGBA.bat"
-        launcher.write_text(WINDOWS_LAUNCHER.replace("\n", "\r\n"), encoding="utf-8", newline="")
+        for demo in PACKAGED_GAMES:
+            package_game(ROOT / "games" / demo, games / f"{demo}.sgba")
+    (app / "saves").mkdir()
+
+    launcher_name = f"{game_name}.sh" if target.startswith("arkos") else f"{game_name}.bat"
+    how = HOW[target].format(launcher=launcher_name, name=game_name)
+    (app / "README.txt").write_text(README.format(how=how, name=game_name), encoding="utf-8")
+    if target.startswith("arkos"):
+        launcher = bundle / launcher_name
+        launcher.write_text(ARKOS_LAUNCHER.replace("@GAME@", game_arg), encoding="utf-8", newline="\n")
+    else:
+        launcher = bundle / launcher_name
+        launcher.write_text(WINDOWS_LAUNCHER.replace("@GAME@", game_arg).replace("\n", "\r\n"), encoding="utf-8", newline="")
     shutil.copy2(app / "README.txt", bundle / "README.txt")
 
-    archive_path = out_dir / f"SGBA-{target}.zip"
+    archive_path = out_dir / f"{label}.zip"
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for path in sorted(bundle.rglob("*")):
             if not path.is_file():
@@ -295,9 +353,13 @@ def main() -> int:
     parser.add_argument("target", choices=sorted(TARGETS))
     parser.add_argument("--cache", type=Path, default=ROOT / ".bundle_cache")
     parser.add_argument("--out", type=Path, default=ROOT / "dist")
+    parser.add_argument("--web", type=Path, help="Folder of a browser game (index.html) to ship as the only game, started directly")
+    parser.add_argument("--name", help="Game name: used for the launcher file and the Ports list entry")
+    parser.add_argument("--ui-config", type=Path, help="sgba_ui.json with this game's SGBA settings (overrides one inside the folder)")
+    parser.add_argument("--exclude", action="append", default=[], help="Glob of game files to leave out, e.g. '*.mp3' (repeatable)")
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
-    archive = build(args.target, args.cache, args.out)
+    archive = build(args.target, args.cache, args.out, args.web, args.name, args.ui_config, tuple(args.exclude))
     print(f"built {archive} ({archive.stat().st_size / 1e6:.1f} MB)")
     return 0
 

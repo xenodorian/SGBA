@@ -238,6 +238,19 @@ class JSHost:
             image = self.texts.put(key, image)
         return image
 
+    def gradient_text(self, text: str, font_key, origin, style, alpha: int) -> pygame.Surface:
+        """Text filled with a gradient: a gradient tile cut to the shape of the letters."""
+        key = ("gtext", text, font_key, tuple(origin), style, alpha >> 3)
+        image = self.tiles.get(key)
+        if image is None:
+            mask = self.font(*font_key).render(text, True, (255, 255, 255))
+            image = gradient_surface(mask.get_size(), tuple(origin), style).convert_alpha()
+            image.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+            if alpha < 255:
+                image.set_alpha(alpha)
+            image = self.tiles.put(key, image)
+        return image
+
     def solid_tile(self, size, rgba) -> pygame.Surface:
         key = ("solid", tuple(size), rgba)
         tile = self.tiles.get(key)
@@ -511,6 +524,9 @@ class JSGame:
         self.host.load_page(index)
         if self.host.main_surface is None:
             raise RuntimeError("index.html has no <canvas> element")
+        hide = [h for h in self.config.get("hide", []) if isinstance(h, str)]
+        if hide:
+            self.host.ctx.eval(f"__sgba_set_hide({json.dumps(hide)})")
         self.ui = sgba_js_ui.DomOverlay(self.host)
         self._held: dict = {}
         self._perf = {"update": 0.0, "draw": 0.0, "frame": 0.0, "worst": 0.0, "n": 0}
@@ -536,7 +552,7 @@ class JSGame:
     @staticmethod
     def _load_config(root: Path) -> dict:
         config = {"navigation": "engine", "hotkeys": {}, "color_depth": 32, "image_depth": 32, "rle": True,
-                  "image_budget_mb": 96, "alpha": "threshold", "preload": []}
+                  "image_budget_mb": 96, "alpha": "threshold", "preload": [], "hide": [], "title": None}
         path = root / "sgba_ui.json"
         if path.is_file():
             try:

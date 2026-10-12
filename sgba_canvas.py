@@ -680,9 +680,10 @@ class Canvas2D:
         self._text(str(text), x, y, self.s["stroke"])
 
     def _text(self, text: str, x, y, style) -> None:
-        if not text or style[0] == "grad":
+        if not text:
             return
-        color = self._color(style)
+        gradient = style[0] == "grad"
+        color = (255, 255, 255, int(255 * self.s["alpha"])) if gradient else self._color(style)
         if color[3] <= 0:
             return
         size, bold, italic = self.s["font"]
@@ -704,11 +705,14 @@ class Canvas2D:
         left, top = round(px), round(py)
         flags = self._flags()
 
-        def draw(surface, text=text, font_key=font_key, color=color, left=left, top=top, flags=flags):
-            image = host.text_image(text, font_key, color[:3], color[3])
+        def draw(surface, text=text, font_key=font_key, color=color, left=left, top=top, flags=flags, style=style):
+            if gradient:
+                image = host.gradient_text(text, font_key, (left, top), style, color[3])
+            else:
+                image = host.text_image(text, font_key, color[:3], color[3])
             surface.blit(image, (left, top), special_flags=flags)
             return "alpha"
-        self.emit(("T", text, font_key, color, left, top, flags), pygame.Rect(left, top, w, h), draw)
+        self.emit(("T", text, font_key, color, left, top, flags, style if gradient else None), pygame.Rect(left, top, w, h), draw)
 
     # ------------------------------------------------------------ pixels
     def get_image_hex(self, x, y, w, h) -> str:

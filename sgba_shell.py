@@ -308,7 +308,15 @@ def discover_games(root: Path = None) -> list:
                 log(f"invalid package {package.name}: {exc}")
                 entries.append((f"{package.stem} (invalid)", "game", package, False))
         for folder in sorted(p for p in games_dir.iterdir() if p.is_dir() and p.name != "template"):
-            if (folder / "main.py").is_file():
+            if (folder / "index.html").is_file():          # a browser game, run straight from its folder
+                title = folder.name
+                try:
+                    data = json.loads((folder / "sgba_ui.json").read_text(encoding="utf-8"))
+                    title = str(data.get("title") or title)
+                except (OSError, ValueError, AttributeError):
+                    pass
+                entries.append((title, "game", folder, True))
+            elif (folder / "main.py").is_file():
                 entries.append((f"{folder.name} (dev)", "game", folder / "main.py", True))
     return entries
 
@@ -328,12 +336,10 @@ def launch_game(display, inputs, rt, path: Path) -> str:
     modules_before = set(sys.modules)
     path_added = ""
     try:
-        game_path = rt.resolve_game_path(path)
+        game, logical_size, game_path = rt.open_game(path)
         path_added = str(game_path.resolve().parent)
-        config = rt.load_game_config(game_path)
-        game = rt.load_game(game_path)
         log(f"running {path.name}")
-        return rt.run_scene(display, inputs, game, config["logical_size"])
+        return rt.run_scene(display, inputs, game, logical_size)
     except (Exception, SystemExit) as exc:
         detail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
         log(f"game error in {path.name}:\n{detail}")

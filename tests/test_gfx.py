@@ -236,6 +236,19 @@ class CanvasEngineTests(unittest.TestCase):
         game = self.make(page)
         self.assertEqual(game.host.ctx.eval("window.px"), 255)
 
+    def test_gradient_filled_text_is_drawn(self):
+        page = """<canvas id="view" width="120" height="40"></canvas><script>
+          const x = document.getElementById('view').getContext('2d');
+          x.fillStyle = '#000'; x.fillRect(0, 0, 120, 40);
+          const g = x.createLinearGradient(0, 0, 0, 40); g.addColorStop(0, '#ff0'); g.addColorStop(1, '#f00');
+          x.font = 'bold 28px sans-serif'; x.textBaseline = 'top'; x.fillStyle = g; x.fillText('HI', 4, 2);
+        </script>"""
+        game = self.make(page)
+        shot = self.frames(game, 2)[-1][0]
+        lit = [tuple(shot.get_at((x, y)))[:3] for x in range(4, 40) for y in range(2, 34) if sum(shot.get_at((x, y))[:3]) > 60]
+        self.assertGreater(len(lit), 40)                         # the letters were filled, not skipped
+        self.assertTrue(all(r > 100 for r, g, b in lit))         # with the yellow-to-red gradient
+
     def test_overlay_menu_forces_a_full_redraw_then_goes_quiet(self):
         page = """<div id="stage"><canvas id="view" width="64" height="48"></canvas>
           <div id="menu" hidden><button id="b">Go</button></div></div><script>

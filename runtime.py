@@ -526,6 +526,36 @@ def load_game(path: Path):
     return game
 
 
+def save_key(original) -> str:
+    """Stable name for a game's save folder, so progress survives package updates."""
+    original = Path(original)
+    if original.suffix.lower() == ".sgba":
+        name = validate_package(original)["title"]
+    elif original.is_dir():
+        name = original.name
+    else:
+        name = original.parent.name
+    return "".join(c if c.isalnum() else "-" for c in name.lower()).strip("-") or "game"
+
+
+def saves_dir() -> Path:
+    return Path(os.environ.get("SGBA_SAVE_DIR") or Path(__file__).resolve().parent / "saves")
+
+
+def open_game(original):
+    """Resolve and load a game from a .sgba, a game folder or an entry file.
+
+    Returns (game, logical_size, entry_path). Browser games (index.html) run in the JavaScript host.
+    """
+    entry = resolve_game_path(original)
+    if entry.suffix.lower() == ".html":
+        import sgba_js
+        game = sgba_js.JSGame(entry.parent, entry.name, save_dir=saves_dir() / save_key(original))
+        return game, game.logical_size, entry
+    config = load_game_config(entry)
+    return load_game(entry), config["logical_size"], entry
+
+
 def run_scene(display: pygame.Surface, inputs: "InputState", game, logical_size: tuple,
               exit_on_combo: bool = True) -> str:
     """Run one game or shell scene until it ends. Returns "closed" (window closed) or "done".
@@ -654,10 +684,11 @@ def main() -> int:
     direct = None
     if args.game is not None:
         try:
+            direct = args.game
             if Path(args.game).suffix.lower() == ".sgba":
                 game_title = validate_package(args.game)["title"]
-            direct = resolve_game_path(args.game)
-            config = load_game_config(direct)
+            else:
+                game_title = Path(resolve_game_path(args.game)).parent.name
         except (OSError, PackageError, RuntimeError) as exc:
             parser.error(str(exc))
 
@@ -673,8 +704,8 @@ def main() -> int:
                        f"joysticks {pygame.joystick.get_count()}")
         pygame.display.set_caption(f"SGBA: {game_title}")
         if direct is not None:
-            game = load_game(direct)
-            run_scene(display, inputs, game, config["logical_size"])
+            game, logical_size, _entry = open_game(direct)
+            run_scene(display, inputs, game, logical_size)
         else:
             sgba_shell.shell_main(display, inputs, sys.modules[__name__])
     finally:

@@ -113,3 +113,12 @@ The engine is built like a small console, to fit a 1 GB handheld with most of th
 `sgba_ui.json` options: `navigation`, `hotkeys`, `color_depth` (16|32), `image_depth` (16|32), `rle` (true|false), `image_budget_mb`, `alpha` (`"threshold"` cuts faint anti-aliased edges on sprites to on/off transparency, `"keep"` preserves them), `preload`.
 
 Writing for the engine: avoid `getImageData`/`putImageData` (forces slow drawing), avoid per-frame full-screen translucent overlays and gradients (they are blended pixel by pixel), prefer sprite sheets under a few thousand pixels wide, and keep sound files under a few MB.
+
+### Browser games as packages and bundles
+
+- `python tools/package_game.py WEBFOLDER out.sgba --exclude "*.mp3"` packages a folder with `index.html` (manifest `"runtime": "js"`). Python games keep `main.py`.
+- A loose folder works too: `python runtime.py path/to/web` or put the folder under `games/` and it appears in the menu with the title from its `sgba_ui.json`.
+- `python tools/build_bundle.py windows-x64|arkos-aarch64 --web WEBFOLDER --name "Game Name" --ui-config sgba_ui.json --exclude "*.mp3"` builds a single-game bundle: the game ships as a loose folder (nothing is unpacked on the device), the launcher is named after the game and starts it directly, and `dist/<name>.sgba` is written as well. Running the launcher with a folder or `.sgba` path as its first argument runs that instead, so a bundle can be pointed at live working files.
+- Saves live in `sgba/saves/<game>/` next to the engine (override with `SGBA_SAVE_DIR`); extracted packages in `sgba/cache/` (`SGBA_CACHE_DIR`).
+- `sgba_ui.json` also accepts `hide`: a list of CSS selectors (or `text:Label start`) for buttons that should not appear on the device, and `title`.
+- `python tools/sgba_check.py WEBFOLDER` scans a browser game for features SGBA cannot run and loads it, failing on JavaScript errors.
