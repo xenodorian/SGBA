@@ -151,6 +151,7 @@ class JSHost:
             canvas.surface = self._opaque_surface((w, h))
             canvas.prev = None
             canvas.pending = []
+            canvas.stale = None
             self.first_frame = True
         else:
             canvas.surface = pygame.Surface((w, h), pygame.SRCALPHA)

@@ -144,6 +144,7 @@ class Canvas2D:
         self.persistent = False
         self.prev = None
         self.pending = []
+        self.stale = None
 
     @property
     def rect(self) -> pygame.Rect:
@@ -193,7 +194,8 @@ class Canvas2D:
         """Stop retained mode: draw anything pending now and from here on draw immediately."""
         if self.persistent:
             return
-        pending, self.pending = self.pending, []
+        pending = [op for frame in (self.stale or []) for op in frame] + self.pending
+        self.pending, self.stale = [], []
         self.persistent = True
         self.prev = None
         for op in pending:
@@ -203,39 +205,64 @@ class Canvas2D:
         self.touched = True
 
     force_full = False
+    stale: list = None          # frames recorded by earlier ticks that were never shown
 
     def begin_frame(self) -> None:
-        """Called before the page runs a new tick. Drawing recorded by an earlier tick that was never shown is
-        either dropped (a complete repaint is superseded by the next one) or applied now (partial drawing builds on
-        what is already there)."""
+        """Called before the page runs a new tick: set aside what the last tick drew. Whether it is shown or dropped
+        is decided when a frame is composited, once it is known whether a newer complete repaint exists."""
         if not self.retained or self.persistent or not self.pending:
             return
-        if self._fully_covered([op.box for op in self.pending if op.covers]):
-            self.pending = []
-            self.host.stats.skipped += 1
-            return
-        for op in self.pending:
-            self._run(op, None)
-        self.surface.set_clip(None)
+        if self.stale is None:
+            self.stale = []
+        self.stale.append(self.pending)
         self.pending = []
+        if len(self.stale) > 8:                      # a page that never repaints fully: apply old frames now
+            self._flush_stale()
+
+    def _flush_stale(self) -> None:
+        for frame in self.stale or []:
+            for op in frame:
+                self._run(op, None)
+        self.surface.set_clip(None)
+        self.stale = []
         self.prev = None
         self.force_full = True
         self.version += 1
 
     def end_frame(self):
-        """Composite the newest frame: returns the list of changed rectangles (empty = nothing changed)."""
+        """Composite the newest frame(s): returns the list of changed rectangles (empty = nothing changed)."""
         stats = self.host.stats
-        ops, self.pending = self.pending, []
+        frames, self.stale = (self.stale or []), []
+        if self.pending:
+            frames.append(self.pending)
+        self.pending = []
         if not self.retained or self.persistent:
-            touched, self.touched = self.touched or bool(ops), False
+            touched, self.touched = self.touched or any(frames), False
             return [self.rect] if touched else []
+        frames = [f for f in frames if f]
+        if not frames:
+            if self.force_full:
+                self.force_full = False
+                return [self.rect]
+            return []
+        # a complete repaint makes every earlier frame irrelevant: show only the newest one
+        for i in range(len(frames) - 1, -1, -1):
+            if self._fully_covered([op.box for op in frames[i] if op.covers]):
+                stats.skipped += i
+                frames = frames[i:]
+                break
+        out: list = []
+        for ops in frames:
+            out.extend(self._composite(ops))
         if self.force_full:
             self.force_full = False
-            if not ops:
-                return [self.rect]
+            return [self.rect]
+        return out
+
+    def _composite(self, ops: list):
+        stats = self.host.stats
+        if self.force_full:
             self.prev = None
-        if not ops:
-            return []
         full = self.rect
         if not self._fully_covered([op.box for op in ops if op.covers]):
             for op in ops:               # not a full repaint: behave like a normal persistent canvas

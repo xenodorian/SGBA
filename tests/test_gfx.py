@@ -247,7 +247,8 @@ class CanvasEngineTests(unittest.TestCase):
         shot = self.frames(game, 2)[-1][0]
         lit = [tuple(shot.get_at((x, y)))[:3] for x in range(4, 40) for y in range(2, 34) if sum(shot.get_at((x, y))[:3]) > 60]
         self.assertGreater(len(lit), 40)                         # the letters were filled, not skipped
-        self.assertTrue(all(r > 100 for r, g, b in lit))         # with the yellow-to-red gradient
+        self.assertGreater(max(r for r, g, b in lit), 200)       # in the gradient's red/yellow, not plain white
+        self.assertTrue(all(r >= g for r, g, b in lit))          # yellow (top) to red (bottom): never bluer or greener than red
 
     def test_overlay_menu_forces_a_full_redraw_then_goes_quiet(self):
         page = """<div id="stage"><canvas id="view" width="64" height="48"></canvas>
