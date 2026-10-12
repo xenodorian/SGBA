@@ -93,6 +93,20 @@ def _lerp_stops(stops, t):
     return stops[-1][1]
 
 
+def relative_gradient(style, origin, quantum: float = 4.0):
+    """The same gradient expressed relative to the rectangle it fills, coordinates rounded to a quarter pixel, so a gradient that
+    moves along with what it fills (bobbing letters) is one cached picture instead of a new one every frame."""
+    tag, kind, args, stops = style
+    ox, oy = origin
+    if kind == "linear":
+        x0, y0, x1, y1 = args
+        rel = (x0 - ox, y0 - oy, x1 - ox, y1 - oy)
+    else:
+        x0, y0, r0, x1, y1, r1 = args
+        rel = (x0 - ox, y0 - oy, r0, x1 - ox, y1 - oy, r1)
+    return (tag, kind, tuple(round(v * quantum) / quantum for v in rel), stops)
+
+
 def merge_rects(rects, limit: int = MAX_DIRTY_RECTS, margin: int = 6):
     """Combine overlapping or nearby rectangles; if too many remain, use one bounding box."""
     rects = [r.copy() for r in rects if r.w > 0 and r.h > 0]
@@ -324,7 +338,14 @@ class Canvas2D:
             regions = [full]
             area = full.w * full.h
         for region in regions:
-            for op in ops:
+            start = 0
+            for i in range(len(ops) - 1, -1, -1):          # anything under the last opaque op that covers the region is hidden
+                op = ops[i]
+                if op.covers and op.box.contains(region):
+                    start = i
+                    break
+            for i in range(start, len(ops)):
+                op = ops[i]
                 if op.box.colliderect(region):
                     self._run(op, region)
                     stats.replayed += 1
@@ -369,12 +390,15 @@ class Canvas2D:
         clip = s["clip"]
         sig = (key, s["m"], s["alpha"], s["comp"], s["fill"], s["stroke"], s["lw"], s["font"], s["align"], s["baseline"],
                None if clip is None else tuple(clip))
-        ops = self.groups.get(sig)
-        if ops is not None:
-            self.groups.move_to_end(sig)
-            self.pending.extend(ops)
-            self.host.stats.ops += len(ops)
-            return 1
+        entry = self.groups.get(sig)
+        if entry is not None:
+            ops, deps = entry
+            version = self.host.source_version
+            if all(version(src) == ver for src, ver in deps):       # pictures from other canvases must not have changed
+                self.groups.move_to_end(sig)
+                self.pending.extend(ops)
+                self.host.stats.ops += len(ops)
+                return 1
         self._grp = (sig, len(self.pending))
         return 0
 
@@ -386,11 +410,12 @@ class Canvas2D:
         ops = self.pending[start:]
         if not ops or len(ops) > self.GROUP_MAX_OPS:
             return
-        for op in ops:        # a picture taken from another canvas can change without the op noticing: do not keep those
+        deps = set()          # pictures taken from other canvases: remember which version the ops were recorded against
+        for op in ops:
             kind = op.sig[0]
             if (kind == "I" or kind == "R" or kind == "H") and op.sig[1] < IMAGE_ID_BASE:
-                return
-        self.groups[sig] = ops
+                deps.add((op.sig[1], op.sig[2]))
+        self.groups[sig] = (ops, tuple(deps))
         if len(self.groups) > self.GROUP_LIMIT:
             self.groups.popitem(last=False)
 
@@ -985,13 +1010,15 @@ def gradient_surface(size, origin, style, depth_like: pygame.Surface | None = No
         dx, dy = x1 - x0, y1 - y0
         length2 = dx * dx + dy * dy or 1.0
         if abs(dy) >= abs(dx):
+            base = (w / 2 + ox - x0) * dx
             for row in range(h):
-                t = ((w / 2 + ox - x0) * dx + (oy + row + 0.5 - y0) * dy) / length2
-                tile.fill(_lerp_stops(stops, max(0.0, min(1.0, t))), (0, row, w, 1))
+                t = (base + (oy + row + 0.5 - y0) * dy) / length2
+                tile.fill(_lerp_stops(stops, 0.0 if t < 0.0 else 1.0 if t > 1.0 else t), (0, row, w, 1))
         else:
+            base = (h / 2 + oy - y0) * dy
             for col in range(w):
-                t = ((ox + col + 0.5 - x0) * dx + (h / 2 + oy - y0) * dy) / length2
-                tile.fill(_lerp_stops(stops, max(0.0, min(1.0, t))), (col, 0, 1, h))
+                t = ((ox + col + 0.5 - x0) * dx + base) / length2
+                tile.fill(_lerp_stops(stops, 0.0 if t < 0.0 else 1.0 if t > 1.0 else t), (col, 0, 1, h))
     else:
         x0, y0, r0, x1, y1, r1 = args
         steps = int(max(r0, r1)) + 1

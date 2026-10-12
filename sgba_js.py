@@ -24,7 +24,7 @@ import pygame
 
 import sgba_audio
 import sgba_js_ui
-from sgba_canvas import Canvas2D, gradient_surface, mult_ready
+from sgba_canvas import Canvas2D, gradient_surface, mult_ready, relative_gradient
 from sgba_gfx import ImageStore, LRUBytes, Stats, fade
 
 try:
@@ -333,11 +333,12 @@ class JSHost:
 
     def gradient_text(self, text: str, font_key, origin, style, alpha: int) -> pygame.Surface:
         """Text filled with a gradient: a gradient tile cut to the shape of the letters."""
-        key = ("gtext", text, font_key, tuple(origin), style, alpha >> 3)
+        style = relative_gradient(style, origin)
+        key = ("gtext", text, font_key, style, alpha >> 3)
         image = self.tiles.get(key)
         if image is None:
             mask = self.font(*font_key).render(text, True, (255, 255, 255))
-            image = gradient_surface(mask.get_size(), tuple(origin), style).convert_alpha()
+            image = gradient_surface(mask.get_size(), (0, 0), style).convert_alpha()
             image.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
             if alpha < 255:
                 image = fade(image, alpha)
@@ -357,10 +358,11 @@ class JSHost:
 
     def gradient_tile(self, size, origin, style, alpha: float = 1.0, mult: bool = False) -> pygame.Surface:
         level = int(round(alpha * 255)) >> 3 << 3
-        key = ("grad", tuple(size), tuple(origin), style, level, mult)
+        style = relative_gradient(style, origin)
+        key = ("grad", tuple(size), style, level, mult)
         tile = self.tiles.get(key)
         if tile is None:
-            tile = gradient_surface(tuple(size), tuple(origin), style).convert_alpha()
+            tile = gradient_surface(tuple(size), (0, 0), style).convert_alpha()
             if level < 248:
                 tile = fade(tile, level or 8)
             if mult:
