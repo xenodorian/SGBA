@@ -2,7 +2,7 @@
 
     python tools/parity.py GAME_FOLDER [--out DIR] [--scenes title level1 ...] [--tolerance 8]
 
-Scenes and seed come from the game's own sgba/pixel_check.py. Text is expected to differ a little
+Scenes and seed come from the game's own sgba/pixel_check.py (the game repo, not this one). Text is expected to differ a little
 (stb_truetype against SDL_ttf), so the report counts pixels whose channels differ by more than the tolerance and
 shows the share of the picture, plus a diff image per scene.
 """
@@ -17,18 +17,16 @@ from pathlib import Path
 import pygame
 
 ROOT = Path(__file__).resolve().parent.parent
-SEED = "0=(function(){let s=12345;Math.random=function(){s=(s*1664525+1013904223)>>>0;return s/4294967296;};})()"
-START = "30=document.getElementById('btn-start').click()"
-UNLOCK = "60=P.unlockAllLevels();bibooGame.unlock('laser_beam')"
-SHOTS = {
-    "title": (200, "", []),
-    "level1": (300, "150:hold:right:60", [START, UNLOCK, "90=bibooGame.enterLevel(1)"]),
-    "level1b": (420, "150:hold:right:60,300:tap:a:20", [START, UNLOCK, "90=bibooGame.enterLevel(1)", "100=bibooGame.setMeters(100,100,100)"]),
-    "level3": (360, "150:hold:right:90,260:tap:a:12", [START, UNLOCK, "90=bibooGame.enterLevel(3)", "100=bibooGame.setMeters(100,100,100)"]),
-    "level4": (360, "170:hold:right:150,250:tap:a:25", [START, UNLOCK, "90=bibooGame.enterLevel(4)"]),
-    "beam": (192, "149:hold:l1:60,152:hold:a:3", [START, UNLOCK, "90=bibooGame.enterLevel(3)", "100=bibooGame.setMeters(100,100,100)"]),
-    "overworld": (200, "", [START, "60=goOverworld()"]),
-}
+
+
+def load_scenes(path: Path):
+    """The scene list belongs to the game: its sgba/pixel_check.py defines SEED and SHOTS (name -> frames, input script, JS)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("game_pixel_check", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(path.parent))
+    spec.loader.exec_module(module)
+    return module.SEED, module.SHOTS
 
 
 def run(cmd, env):
@@ -39,12 +37,15 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("game")
     ap.add_argument("--out", default=str(ROOT / "native" / "build" / "parity"))
-    ap.add_argument("--scenes", nargs="*", default=list(SHOTS))
+    ap.add_argument("--scenes-file", help="the game's pixel_check.py (default: GAME/../sgba/pixel_check.py)")
+    ap.add_argument("--scenes", nargs="*")
     ap.add_argument("--tolerance", type=int, default=8)
     ap.add_argument("--max-share", type=float, default=3.0, help="fail when more than this percent of a scene differs (text never matches exactly)")
     ap.add_argument("--binary", default=str(ROOT / "native" / "build" / "x86_64" / "sgba"))
     args = ap.parse_args()
     out = Path(args.out)
+    seed, SHOTS = load_scenes(Path(args.scenes_file) if args.scenes_file else Path(args.game).resolve().parent / "sgba" / "pixel_check.py")
+    args.scenes = args.scenes or list(SHOTS)
     out.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy")
     pygame.init()
@@ -54,7 +55,7 @@ def main() -> int:
         frames, script, js = SHOTS[name]
         py, c = out / f"{name}_py.png", out / f"{name}_c.png"
         jsargs = []
-        for item in [SEED] + js:
+        for item in [seed] + js:
             jsargs += ["--js", item]
         run([sys.executable, str(ROOT / "tools" / "js_bench.py"), args.game, "--frames", str(frames), "--script", script or "9999:a", "--shot", str(py)] + jsargs, env)
         run([args.binary, args.game, "--frames", str(frames), "--script", script or "9999:a", "--shot", str(c)] + jsargs, env)
