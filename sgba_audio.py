@@ -131,12 +131,25 @@ class AudioEngine:
             return self.music_sid == sid and pygame.mixer.music.get_busy()
         return src.channel is not None and src.channel.get_busy()
 
+    @staticmethod
+    def _release_music() -> None:
+        """Close the streamed track. stop() leaves the file open, and Windows cannot delete or replace an open file.
+        unload() needs pygame 2.0 or newer, so older versions keep the old behaviour."""
+        unload = getattr(pygame.mixer.music, "unload", None)
+        if unload is not None:
+            try:
+                unload()
+            except pygame.error:
+                pass
+
     def update(self) -> None:
         """Forget sources that finished playing."""
         for sid in [s for s, src in self.sources.items() if not src.loop and not self.busy(s)]:
-            self.sources.pop(sid, None)
+            src = self.sources.pop(sid, None)
             if self.music_sid == sid:
                 self.music_sid = None
+                if src is not None and src.stream and self.ready:
+                    self._release_music()
 
     # -- playback
     def _start(self, sid: int, buffer_id: int, spec: str) -> None:
@@ -203,6 +216,7 @@ class AudioEngine:
             if src.stream:
                 if self.music_sid == sid:
                     pygame.mixer.music.stop()
+                    self._release_music()
                     self.music_sid = None
             elif src.channel is not None:
                 src.channel.stop()

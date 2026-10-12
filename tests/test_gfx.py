@@ -367,6 +367,7 @@ class AudioTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
+        self.root = root
         (root / "index.html").write_text(self.PAGE, encoding="utf-8")
         (root / "music.wav").write_bytes(wav_bytes(3.0, 22050))           # ~132 KB: streamed
         (root / "sfx.wav").write_bytes(wav_bytes(0.1, 22050))             # small: decoded and cached
@@ -393,6 +394,29 @@ class AudioTests(unittest.TestCase):
         game.update(1 / 60, inputs)
         self.assertFalse(any(s.stream for s in engine.sources.values()))
 
+    @unittest.skipUnless(os.path.isdir("/proc/self/fd"), "needs /proc to list open files")
+    def test_stopping_music_releases_the_file(self):
+        """A streamed track must not stay open after it stops. Windows cannot delete or replace an open file."""
+        game = self.make()
+        inputs = runtime.InputState()
+        for _ in range(3):
+            game.update(1 / 60, inputs)
+        track = str((self.root / "music.wav").resolve())
+
+        def held():
+            out = []
+            for fd in os.listdir("/proc/self/fd"):
+                try:
+                    out.append(os.readlink(f"/proc/self/fd/{fd}"))
+                except OSError:
+                    pass
+            return track in out
+
+        self.assertTrue(held())                          # playing: open, as expected
+        game.host.ctx.eval("window.music.stop()")
+        game.update(1 / 60, inputs)
+        self.assertFalse(held())
+
     def test_audio_element_plays_at_its_volume(self):
         game = self.make()
         inputs = runtime.InputState()
@@ -415,10 +439,6 @@ class AudioTests(unittest.TestCase):
             self.assertAlmostEqual(sgba_audio.duration_of(wav), 0.5, places=2)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class FadeKeyedTests(unittest.TestCase):
     def test_fade_keeps_colorkey_transparency_after_rle_blit(self):
         pygame.init()
@@ -430,4 +450,9 @@ class FadeKeyedTests(unittest.TestCase):
         screen.blit(keyed, (0, 0))                     # compresses the surface
         faded = sgba_gfx.fade(keyed.subsurface(pygame.Rect(0, 0, 8, 8)), 120)
         self.assertEqual(faded.get_at((0, 0)).a, 0)
-        self.assertEqual(faded.get_at((3, 3)).a, 120)
+        # pygame 2.0.x truncates 255*120/256 to 119, newer versions round to 120
+        self.assertAlmostEqual(faded.get_at((3, 3)).a, 120, delta=1)
+
+
+if __name__ == "__main__":
+    unittest.main()
