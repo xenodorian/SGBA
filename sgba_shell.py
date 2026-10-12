@@ -340,6 +340,7 @@ def launch_game(display, inputs, rt, path: Path) -> str:
     """Run one game from the menu. Returns "closed" if the window was closed."""
     modules_before = set(sys.modules)
     path_added = ""
+    game = None
     try:
         game, logical_size, game_path = rt.open_game(path)
         path_added = str(game_path.resolve().parent)
@@ -353,6 +354,12 @@ def launch_game(display, inputs, rt, path: Path) -> str:
         return rt.run_scene(display, inputs, ErrorScreen(f"{path.stem} stopped", detail), MENU_SIZE,
                             exit_on_combo=False)
     finally:
+        closer = getattr(game, "close", None)
+        if callable(closer):
+            try:
+                closer()
+            except Exception as exc:  # a failing close must not hide the game's own result
+                log(f"close failed for {path.name}: {exc}")
         if path_added:
             _unload_game(path_added, modules_before)
 

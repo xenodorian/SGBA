@@ -371,7 +371,9 @@ class AudioTests(unittest.TestCase):
         (root / "index.html").write_text(self.PAGE, encoding="utf-8")
         (root / "music.wav").write_bytes(wav_bytes(3.0, 22050))           # ~132 KB: streamed
         (root / "sfx.wav").write_bytes(wav_bytes(0.1, 22050))             # small: decoded and cached
-        return sgba_js.JSGame(root, save_dir=root / "save", log=lambda *a: None)
+        game = sgba_js.JSGame(root, save_dir=root / "save", log=lambda *a: None)
+        self.addCleanup(game.close)                                       # runs before tmp.cleanup: Windows cannot delete an open file
+        return game
 
     def test_music_streams_effects_decode_and_gain_follows_automation(self):
         game = self.make()
@@ -416,6 +418,18 @@ class AudioTests(unittest.TestCase):
         game.host.ctx.eval("window.music.stop()")
         game.update(1 / 60, inputs)
         self.assertFalse(held())
+
+    @unittest.skipUnless(os.path.isdir("/proc/self/fd"), "needs /proc to list open files")
+    def test_closing_the_game_releases_music_that_is_still_playing(self):
+        game = self.make()
+        inputs = runtime.InputState()
+        for _ in range(3):
+            game.update(1 / 60, inputs)
+        track = str((self.root / "music.wav").resolve())
+        open_files = lambda: [os.readlink(f"/proc/self/fd/{fd}") for fd in os.listdir("/proc/self/fd") if os.path.exists(f"/proc/self/fd/{fd}")]
+        self.assertIn(track, open_files())               # the page started its music and never stopped it
+        game.close()
+        self.assertNotIn(track, open_files())
 
     def test_audio_element_plays_at_its_volume(self):
         game = self.make()

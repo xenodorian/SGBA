@@ -142,6 +142,17 @@ class AudioEngine:
             except pygame.error:
                 pass
 
+    def close(self) -> None:
+        """Stop everything and release the streamed file (call when the page or game is done)."""
+        if self.ready and self.music_sid is not None:
+            try:
+                pygame.mixer.music.stop()
+            except pygame.error:
+                pass
+            self._release_music()
+        self.music_sid = None
+        self.sources.clear()
+
     def update(self) -> None:
         """Forget sources that finished playing."""
         for sid in [s for s, src in self.sources.items() if not src.loop and not self.busy(s)]:

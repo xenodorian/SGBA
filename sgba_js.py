@@ -114,6 +114,10 @@ class JSHost:
         self._set_pads = self.ctx.get("__sgba_set_pads")
 
     # -- python callables exposed to JS
+    def close(self) -> None:
+        """Release what the page holds open (the streamed music file)."""
+        self.audio.close()
+
     def _register(self) -> None:
         add = self.ctx.add_callable
         add("__py_log", lambda level, msg: self._js_log(level, msg))
@@ -790,6 +794,10 @@ class JSGame:
                             f"({store.bytes // 1048576} MB, {store.evictions} evictions), composited {host.stats.replayed // n} ops/frame, "
                             f"js errors {host.errors}")
         self._perf = {"update": 0.0, "draw": 0.0, "frame": 0.0, "worst": 0.0, "n": 0, "updates": 0, "present": 0.0}
+
+    def close(self) -> None:
+        """Called when the game is left: release files the page holds open."""
+        self.host.close()
 
     def update(self, dt: float, inputs) -> None:
         started = time.perf_counter()
