@@ -2,6 +2,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include "sgba.h"
+#include "pkg.h"
 #include "input.h"
 #include "json.h"
 
@@ -67,17 +68,20 @@ NATIVE(n_list_games) {
             snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
             snprintf(index, sizeof index, "%s/index.html", path);
             struct stat st;
-            if (stat(index, &st) != 0) continue;
-            Config cfg;
-            config_load(path, &cfg);
+            char ptitle[200] = "";
+            int packaged = pkg_is_package(path) && stat(path, &st) == 0 && !S_ISDIR(st.st_mode);
+            if (packaged) { if (pkg_title(path, ptitle, sizeof ptitle) != 0) snprintf(ptitle, sizeof ptitle, "%s", e->d_name); }
+            else if (stat(index, &st) != 0) continue;
+            Config cfg = {0};
+            if (!packaged) config_load(path, &cfg);
             if (!first) json_put(&out, &len, &cap, ",");
             first = 0;
             json_put(&out, &len, &cap, "{\"path\":");
             json_quoted(&out, &len, &cap, path);
             json_put(&out, &len, &cap, ",\"title\":");
-            json_quoted(&out, &len, &cap, cfg.title ? cfg.title : e->d_name);
+            json_quoted(&out, &len, &cap, packaged ? ptitle : (cfg.title ? cfg.title : e->d_name));
             json_put(&out, &len, &cap, "}");
-            config_free(&cfg);
+            if (!packaged) config_free(&cfg);
         }
         if (d) closedir(d);
     }

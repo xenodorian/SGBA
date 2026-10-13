@@ -22,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import build_bundle as bb  # noqa: E402
+from package_game import package_game  # noqa: E402
 
 MAKE_TARGET = {"arkos-aarch64": "aarch64", "windows-x64": "windows"}
 
@@ -97,9 +98,15 @@ def build(target: str, cache: Path, out_dir: Path, web: Path, name: str, ui_conf
             raise SystemExit(f"{controls} is not a valid controls file")
         shutil.copy2(controls, app / "controls.json")
     games = app / "games"
-    bb.stage_web_game(web, games / game_id, name, ui_config, excludes)
+    games.mkdir()
+    staged = out_dir / f".stage-{game_id}"                    # the game is shipped as ONE .sgba file, which the runtime opens directly
+    if staged.exists():
+        shutil.rmtree(staged)
+    bb.stage_web_game(web, staged, name, ui_config, excludes)
+    package_game(staged, games / f"{game_id}.sgba", name)
+    shutil.rmtree(staged)
     (app / "saves").mkdir()
-    game_arg = f"games/{game_id}" if target.startswith("arkos") else f"games\\{game_id}"
+    game_arg = f"games/{game_id}.sgba" if target.startswith("arkos") else f"games\\{game_id}.sgba"
 
     launcher_name = f"{name}.sh" if target.startswith("arkos") else f"{name}.bat"
     how = bb.HOW[target].format(launcher=launcher_name, name=name)

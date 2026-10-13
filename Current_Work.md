@@ -169,3 +169,10 @@ The plan and checklist are in `NATIVE_TODO.md`. Entries below are dated notes as
 2026-10-12: D1 and D2 done (BibooSGBA st177)
 - Cause: the story pictures are 216 px tall panoramas but were drawn at the top of the 480 px canvas without clearing, so the title scene (and its Perry) showed below. drawStoryBg in game/18_story.js now clears and stretches the 384x216 view of the picture over the whole 640x480, the mapping the Perry and twin placements already use.
 - The fire and double pages still show Perry and the red twin together; that is the story (the figure on the lawn, the Double), not the leak.
+
+2026-10-13: native runtime opens .sgba packages directly
+- Owner's report: the GitROMs download put the whole unpacked project on the device (ports/parry-perry with manifest.json and the game files), and they expected a single .sgba that the emulator runs.
+- Finding: the rolling release of BibooSGBA already carries parry-perry.sgba (19 MB, BIBOO_VER st177, CRATE_SCALE 2.8), so the content was current; the native runtime could only run folders, never a .sgba.
+- native/src/pkg.c: the runtime now takes a .sgba path (command line, or listed in the launcher from games/*.sgba with the manifest title). It unpacks once into cache/<name>-<size>-<mtime> next to the program and runs from there; a changed file unpacks again and the old copy is deleted. Path and size limits as in sgba_package.py. Tested with the released parry-perry.sgba (same picture as the folder run) and under QEMU in the aarch64 bundle.
+- tools/build_native_bundle.py now ships games/<name>.sgba (one file) instead of a game folder; the launcher script starts it by that path.
+- Not done: GitROMs (separate repo, not read) still decides what it downloads and where it puts it; for the native runtime it should place the single parry-perry.sgba in sgba/games/ and not unpack it. Not run on the real R36S.

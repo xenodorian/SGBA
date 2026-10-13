@@ -9,6 +9,7 @@
 #define STBI_WRITE_NO_STDIO
 #include "stb_image_write.h"
 #include "sgba.h"
+#include "pkg.h"
 #include "canvas.h"
 #include "natives.h"
 #include "platform.h"
@@ -261,9 +262,18 @@ static int run_interactive(const char *game, const char *save, const char *app_d
             snprintf(launch, sizeof launch, "%s", g_app->choice + 7);
         } else snprintf(launch, sizeof launch, "%s", game);
         const char *save_file = save;
-        char savebuf[2400];
-        if (!save_file || !game) { const char *base = strrchr(launch, '/'); snprintf(savebuf, sizeof savebuf, "%s/saves/%s.json", app_dir, base ? base + 1 : launch); save_file = savebuf; }
-        Host *h = host_create(launch, save_file);
+        char savebuf[2400], folder[2400], cache[2300];
+        if (!save_file || !game) {
+            const char *base = strrchr(launch, '/');
+            snprintf(savebuf, sizeof savebuf, "%s/saves/%s", app_dir, base ? base + 1 : launch);
+            size_t sl = strlen(savebuf);
+            if (pkg_is_package(savebuf)) savebuf[sl - 5] = 0;                               /* parry-perry.sgba saves as parry-perry.json */
+            strncat(savebuf, ".json", sizeof savebuf - strlen(savebuf) - 1);
+            save_file = savebuf;
+        }
+        snprintf(cache, sizeof cache, "%s/cache", app_dir);
+        if (pkg_resolve(launch, cache, folder, sizeof folder) != 0) { sg_log("error", "cannot open %s", launch); break; }
+        Host *h = host_create(folder, save_file);
         if (host_load_page(h, "index.html") != 0) { host_destroy(h); break; }
         g_app->choice[0] = 0;
         int over = 0;
@@ -320,7 +330,10 @@ int main(int argc, char **argv) {
         free(app);
         return rc;
     }
-    Host *h = host_create(game, save);
+    char folder[2400], cache[2300];
+    snprintf(cache, sizeof cache, "%s/cache", app);
+    if (pkg_resolve(game, cache, folder, sizeof folder) != 0) { fprintf(stderr, "cannot open %s\n", game); return 1; }
+    Host *h = host_create(folder, save);
     if (host_load_page(h, "index.html") != 0) return 1;
     host_enable_overlay(h);
     if (hz <= 0) hz = host_config(h)->fps;
