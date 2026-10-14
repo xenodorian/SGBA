@@ -57,8 +57,8 @@ def build(target: str, cache: Path, out_dir: Path, controls: Path | None) -> Pat
         shutil.copy2(controls, app / "controls.json")
     games = app / "games"
     games.mkdir()
-    for demo in bb.PACKAGED_GAMES:
-        package_game(ROOT / "games" / demo, games / f"{demo}.sgba")
+    for demo, title in (("demo", "Demo"), ("input_lab", "Input Lab")):          # the browser-game versions: the C runtime does not run Python games
+        package_game(ROOT / "web_games" / demo, games / f"{demo}.sgba", title)
     (app / "saves").mkdir()
     launcher_name = "SGBA.sh" if arkos else "SGBA.bat"
     text = README.format(version="native", platform="ArkOS handhelds" if arkos else "Windows", launcher=launcher_name)

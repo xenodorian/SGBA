@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Input Lab</title></head>
+<body>
+<canvas id="c" width="640" height="480"></canvas>
+<script>
+(function () {
+'use strict';
+// Input and speed diagnostic: every button of the standard pad layout lights up when pressed, the stick axes are shown,
+// and the frame time of the last second is printed. What the page sees is what every game sees.
+const ctx = document.getElementById('c').getContext('2d');
+const NAMES = ['A', 'B', 'X', 'Y', 'L1', 'R1', 'L2', 'R2', 'SELECT', 'START', 'L3', 'R3', 'UP', 'DOWN', 'LEFT', 'RIGHT'];
+const keys = {};
+document.addEventListener('keydown', (e) => { keys[e.key] = true; });
+document.addEventListener('keyup', (e) => { keys[e.key] = false; });
+let last = null, acc = 0, n = 0, worst = 0, ms = 0, wms = 0, frameNo = 0;
+let cache = '', cacheCanvas = null;
+function frame(now) {
+  frameNo++;
+  const dt = last === null ? 0 : (now - last);
+  last = now;
+  acc += dt; n++; if (dt > worst) worst = dt;
+  if (acc >= 1000) { ms = acc / n; wms = worst; acc = 0; n = 0; worst = 0; }
+  const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+  const p = pads && pads[0] ? pads[0] : null;
+  const down = NAMES.map((_, i) => !!(p && p.buttons[i] && p.buttons[i].pressed));
+  const ax = [0, 1, 2, 3].map((i) => (p && p.axes && p.axes[i]) || 0);
+  const held = Object.keys(keys).filter((k) => keys[k]).join(' ');
+  const key = down.join('') + ax.map((a) => a.toFixed(1)).join(',') + '|' + held + '|' + ms.toFixed(1) + wms.toFixed(0) + (p ? 1 : 0);
+  if (key !== cache || !cacheCanvas) {                 // the whole panel is redrawn only when something changed
+    cache = key;
+    cacheCanvas = cacheCanvas || document.createElement('canvas');
+    cacheCanvas.width = 640; cacheCanvas.height = 480;
+    const g = cacheCanvas.getContext('2d');
+    g.fillStyle = '#070a19'; g.fillRect(0, 0, 640, 480);
+    g.fillStyle = '#f4f8ff'; g.font = '29px sans-serif'; g.textAlign = 'center';
+    g.fillText('Input Lab', 320, 48);
+    g.font = '16px sans-serif'; g.fillStyle = '#96a8c7';
+    g.fillText(p ? 'Pad connected. Press buttons: they light up. Hold START + SELECT to leave.' : 'No pad seen yet: press any button.', 320, 76);
+    g.textAlign = 'left';
+    for (let i = 0; i < NAMES.length; i++) {
+      const bx = 40 + (i % 4) * 148, by = 110 + Math.floor(i / 4) * 62;
+      g.fillStyle = down[i] ? '#23f0e6' : '#0f162c';
+      g.fillRect(bx, by, 136, 48);
+      g.strokeStyle = '#374b70'; g.lineWidth = 2; g.strokeRect(bx + 1, by + 1, 134, 46);
+      g.fillStyle = down[i] ? '#070a19' : '#f4f8ff'; g.font = '20px sans-serif';
+      g.fillText(NAMES[i], bx + 14, by + 31);
+    }
+    g.fillStyle = '#96a8c7'; g.font = '16px sans-serif';
+    g.fillText('axes: ' + ax.map((a) => a.toFixed(2)).join('  '), 40, 380);
+    g.fillText('keys: ' + (held || '-'), 40, 404);
+    g.fillStyle = '#ffe641';
+    g.fillText('frame: ' + ms.toFixed(1) + ' ms average, ' + wms.toFixed(0) + ' ms worst (last second)', 40, 440);
+  }
+  ctx.drawImage(cacheCanvas, 0, 0);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

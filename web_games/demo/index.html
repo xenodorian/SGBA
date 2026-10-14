@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Demo</title></head>
+<body>
+<canvas id="c" width="640" height="480"></canvas>
+<script>
+(function () {
+'use strict';
+// Runtime smoke test: a disc you move with the d-pad (or arrow keys / WASD). Shows the frame time.
+const ctx = document.getElementById('c').getContext('2d');
+const keys = {};
+document.addEventListener('keydown', (e) => { keys[e.key] = true; });
+document.addEventListener('keyup', (e) => { keys[e.key] = false; });
+let x = 320, y = 240, last = null, fps = 0, acc = 0, n = 0;
+const bg = document.createElement('canvas');
+bg.width = 640; bg.height = 480;
+const g = bg.getContext('2d');
+g.fillStyle = '#121826'; g.fillRect(0, 0, 640, 480);
+g.strokeStyle = '#2e3a50'; g.lineWidth = 2; g.strokeRect(24, 24, 592, 432);
+g.fillStyle = '#f5f5f5'; g.font = '30px sans-serif'; g.textAlign = 'center';
+g.fillText('SGBA', 320, 72);
+g.fillStyle = '#c8d2e1'; g.font = '20px sans-serif';
+g.fillText('Move with the d-pad, arrow keys or WASD', 320, 110);
+let label = '', labelCanvas = null;
+function frame(now) {
+  const dt = last === null ? 0 : Math.min(0.05, (now - last) / 1000);
+  last = now;
+  acc += dt; n++;
+  if (acc >= 1) { fps = Math.round(n / acc); acc = 0; n = 0; }
+  const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+  const p = pads && pads[0] ? pads[0] : null;
+  const b = (i) => !!(p && p.buttons[i] && p.buttons[i].pressed);
+  const sp = 220 * dt;
+  if (b(14) || keys.ArrowLeft || keys.a) x -= sp;
+  if (b(15) || keys.ArrowRight || keys.d) x += sp;
+  if (b(12) || keys.ArrowUp || keys.w) y -= sp;
+  if (b(13) || keys.ArrowDown || keys.s) y += sp;
+  x = Math.max(40, Math.min(600, x)); y = Math.max(140, Math.min(440, y));
+  ctx.drawImage(bg, 0, 0);
+  ctx.fillStyle = '#5ad2a0';
+  ctx.beginPath(); ctx.arc(Math.round(x), Math.round(y), 16, 0, Math.PI * 2); ctx.fill();
+  const text = fps + ' fps';
+  if (text !== label || !labelCanvas) {
+    label = text;
+    labelCanvas = labelCanvas || document.createElement('canvas');
+    labelCanvas.width = 120; labelCanvas.height = 24;
+    const lg = labelCanvas.getContext('2d');
+    lg.clearRect(0, 0, 120, 24);
+    lg.fillStyle = '#c8d2e1'; lg.font = '16px sans-serif'; lg.fillText(text, 4, 18);
+  }
+  ctx.drawImage(labelCanvas, 32, 32);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
