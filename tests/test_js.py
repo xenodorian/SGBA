@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -14,6 +15,15 @@ try:
     HAVE_JS = sgba_js.quickjs is not None
 except ImportError:
     HAVE_JS = False
+
+
+class FakePad:
+    """Stands in for a pygame Joystick: get_axis reads from a fixed list."""
+    def __init__(self, axes):
+        self.axes = axes
+
+    def get_axis(self, index):
+        return self.axes[index]
 
 
 def page(body_script: str, canvas="<canvas id=\"view\" width=\"64\" height=\"48\"></canvas>") -> str:
@@ -115,6 +125,28 @@ class JSHostTests(unittest.TestCase):
         game, _ = self.make("window.ok=1; null.boom; window.after=2;")
         self.assertTrue(any(level == "error" for level, _ in self.messages))
         self.assertEqual(game.host.ctx.eval("window.ok"), 1)
+
+    def test_analog_sticks_reach_the_page_as_axes(self):
+        game, _ = self.make("window.read=()=>navigator.getGamepads()[0].axes.map(v=>v.toFixed(2)).join(',')")
+        inputs = runtime.InputState()
+        inputs._joysticks[0] = FakePad([0.5, -0.25, 0.0, 1.0])
+        game.update(1 / 60, inputs)
+        self.assertEqual(game.host.ctx.eval("window.read()"), "0.50,-0.25,0.00,1.00")
+
+    def test_stick_axes_fall_back_to_dpad_and_keys_when_centred(self):
+        game, _ = self.make("window.read=()=>navigator.getGamepads()[0].axes.join(',')")
+        inputs = runtime.InputState()
+        inputs._joysticks[0] = FakePad([0.01, 0.0, 0.0, 0.0])
+        inputs._set("left", ("t",), True)          # d-pad left, stick nearly centred
+        inputs._set("rs_down", ("t",), True)       # right-stick key held
+        game.update(1 / 60, inputs)
+        self.assertEqual(game.host.ctx.eval("window.read()"), "-1,0,0,1")
+
+    def test_menu_open_sends_neutral_sticks(self):
+        game, _ = self.make("")
+        inputs = runtime.InputState()
+        inputs._joysticks[0] = FakePad([0.9, 0.9, 0.9, 0.9])
+        self.assertEqual(json.loads(game._pad_json(inputs, True))[0]["axes"], [0.0, 0.0, 0.0, 0.0])
 
     def test_gamepad_reflects_sgba_actions(self):
         game, _ = self.make("window.read=()=>{const p=navigator.getGamepads()[0];return p?p.buttons[0].pressed+','+p.buttons[12].pressed:'none'}")

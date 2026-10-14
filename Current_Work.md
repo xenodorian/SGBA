@@ -1,6 +1,6 @@
 # Current Work Queue
 
-Last updated: 2026-10-11
+Last updated: 2026-10-14
 Repository: xenodorian/SGBA
 Latest verified runtime/package code: 86ac857780da89a177479574a200e79c4961209a
 
@@ -18,6 +18,24 @@ Must run on any version of the R36S running ArkOS 2, and on a Windows PC. The ha
 - On-screen shell (sgba_shell.py): game menu, first-run controller setup wizard that records whatever the pad sends (button/hat/axis) to controls.json, on-screen error screen, sgba.log. Start+Select returns to the menu.
 - Video: SDL auto driver first, then kmsdrm/x11/wayland/fbcon/directfb. Launcher prefers the device's own libSDL2 via LD_PRELOAD and retries without it if the first attempt fails within 20 seconds.
 Unverified on real hardware (nothing here has touched a device): LD_PRELOAD of the system SDL2 over the bundled one, KMSDRM/Mali display output, pad button numbering (the wizard exists because of this), audio, execute permission of the SD card mount, and 32-bit ArkOS builds (not supported; bundle is aarch64 only).
+
+## Slingshot Orbits port (owner request, 2026-10-14)
+Source: an uploaded single-file browser game (slingshot_orbits_v6.html). Ported to an SGBA browser game with analog controls.
+Controls: left stick sets the slingshot direction (the band is pulled toward the stick, so the ship flies the opposite way); right stick is a 360 degree dial with up = 0 (no power), left = 90 degrees (25 percent), down = 180 (50 percent), right = 270 (75 percent), wrapping; R1 launches. Start retries the orbit, Select opens the difficulty menu. Keyboard and d-pad feed the same axes when no stick is pushed.
+Files:
+- `web_games/slingshot_orbits/`: `index.html` (game, canvas 640x480), `physics.js` (physics, generator and solver shared with the level tool), `levels.js` (220 precomputed levels, generated), `sgba_ui.json`.
+- `games/slingshot_orbits.sgba`: the packaged game (validated with `sgba_package.validate_package`, opens and starts through `runtime.open_game`).
+- `tools/slingshot_levels.js`: regenerates `levels.js` with the browser build's search (Node). The search takes 0.3 to 3 s per orbit in V8 and minutes per orbit in QuickJS, so SGBA cannot run it on the device. Every stored launch is re-simulated and must win; all 220 do, all are strict with no shortcuts. Orbits 1 to 20 are keyed by planet count, and orbits 21 and up cycle through 21 to 30 at 20 planets.
+Framework changes (small, additive):
+- `runtime.py`: `InputState.stick(name)` reads a stick's analog axes live from the first connected pad.
+- `sgba_js.py`: the page's pad feed carries analog stick axes (previously the sticks were digital only, and the left stick sent no axes at all).
+Tests: `tests/test_slingshot.py` (5 tests: levels shipped, menu start, dial clock face, dial hold, stored launch wins orbit 1 through the sticks). `tests/test_js.py` gained 3 tests and `tests/test_runtime.py` gained 1 for the analog path. Full suite: 80 tests pass. `compileall`, `audit_assets` and the demo benchmark pass.
+Verified in the headless host: menu to launch, aim and dial, R1 flight, crash, and the stored winning launches for orbits 1 to 3 through the real controls (score 1000, 2000, 3000 with two shots left). Frame cost on this PC (QuickJS, headless, update plus draw): median about 5 ms while aiming and in flight on a 5-planet level (p95 about 6.5 ms), with the aim preview recalculated every 4 frames. Not measured on any handheld, and a handheld CPU is likely several times slower, so this is the first thing to measure on the device.
+Decisions to confirm with the owner:
+- Left stick direction: the stick is the pull point, so the launch goes the opposite way (as the mouse drag did). Flip the sign in `index.html` `applyAim()` if the owner wants the ship to follow the stick.
+- Audio: the original's synthesized sounds were dropped because SGBA's JS host renders Web Audio as silence.
+- Difficulty: the mouse tolerance (pointer pixels) that the level search used is kept, but a stick's precision is different, so playtesting may show levels are harder or easier than the browser build.
+Not done: no handheld test; the R36S axis numbering is unverified (the default map uses axes 0 to 3, the same as the runtime's default).
 
 ## JavaScript game hosting (owner direction, 2026-10-11)
 Purpose: SGBA hosts browser games written in JavaScript (Parry Perry in xenodorian/Biboo, CryMon in xenodorian/CryMon) so they can be developed and tested on the web and run locally on PC and ArkOS handhelds with only a thin port. Python games remain supported.

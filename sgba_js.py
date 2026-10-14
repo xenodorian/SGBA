@@ -722,20 +722,30 @@ class JSGame:
                 return False
         return self._keys_flag
 
+    STICK_DEAD = 0.08   # analog readings inside this are centred, so the d-pad or keyboard may drive the axis
+
     def _pad_json(self, inputs, neutral: bool) -> str:
         """The standard-layout gamepad as JSON; rebuilt only when a button or stick actually changes."""
         down = inputs.down
         if self._keys_listened():           # the page reads the keyboard itself: do not also send those keys as pad buttons
             down = getattr(inputs, "down_device", down)
-        state = (False,) * 20 if neutral else tuple(bool(down(a)) for a in STANDARD_BUTTONS) + (
-            bool(down("rs_left")), bool(down("rs_right")), bool(down("rs_up")), bool(down("rs_down")))
+        state = (False,) * 16 + (0.0,) * 4 if neutral else tuple(bool(down(a)) for a in STANDARD_BUTTONS) + self._axes(inputs, down)
         if state != self._pad_state:
             self._pad_state = state
             buttons = [{"pressed": v, "touched": v, "value": 1 if v else 0} for v in state[:16]]
-            axes = [0.0, 0.0, -1.0 if state[16] else 1.0 if state[17] else 0.0, -1.0 if state[18] else 1.0 if state[19] else 0.0]
             self._pad_text = json.dumps([{"id": "SGBA standard gamepad", "index": 0, "connected": True, "mapping": "standard",
-                                          "timestamp": 0, "buttons": buttons, "axes": axes}])
+                                          "timestamp": 0, "buttons": buttons, "axes": list(state[16:])}])
         return self._pad_text
+
+    def _axes(self, inputs, down) -> tuple:
+        """Stick axes [left x, left y, right x, right y]: the analog stick where it is pushed, else -1, 0 or 1 from the d-pad or keys."""
+        def digital(minus: str, plus: str) -> float:
+            return (1.0 if down(plus) else 0.0) - (1.0 if down(minus) else 0.0)
+        stick = getattr(inputs, "stick", None)
+        left = stick("left") if stick else (0.0, 0.0)
+        right = stick("right") if stick else (0.0, 0.0)
+        pairs = ((left[0], "left", "right"), (left[1], "up", "down"), (right[0], "rs_left", "rs_right"), (right[1], "rs_up", "rs_down"))
+        return tuple(round(analog, 3) if abs(analog) > self.STICK_DEAD else digital(minus, plus) for analog, minus, plus in pairs)
 
     def _repeat(self, inputs, action: str, dt: float) -> bool:
         """True on the press and then at a steady rate while the action stays held."""

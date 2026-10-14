@@ -122,6 +122,25 @@ class RuntimeTests(unittest.TestCase):
         inputs.process(pygame.event.Event(pygame.JOYAXISMOTION, instance_id=3, axis=0, value=0.8))
         self.assertTrue(inputs.down("right"))
 
+    def test_stick_reads_live_analog_axes_from_first_pad(self):
+        class Pad:
+            def __init__(self, axes):
+                self.axes = axes
+
+            def get_axis(self, index):
+                return self.axes[index]
+
+        inputs = runtime.InputState()
+        self.assertEqual(inputs.stick("left"), (0.0, 0.0))            # no pad connected
+        pad = Pad([0.25, -0.5, 0.75, 1.0])
+        inputs._joysticks[7] = pad
+        self.assertEqual(inputs.stick("left"), (0.25, -0.5))
+        self.assertEqual(inputs.stick("right"), (0.75, 1.0))
+        pad.axes[0] = -1.0
+        self.assertEqual(inputs.stick("left"), (-1.0, -0.5))          # read live, not cached
+        with self.assertRaises(ValueError):
+            inputs.stick("up")
+
     def test_asset_store_caches_images_and_enforces_dimensions(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

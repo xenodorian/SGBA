@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Slingshot Orbits</title>
+</head>
+<body>
+<canvas id="c" width="640" height="480"></canvas>
+<div id="menu">
+  <h1>Slingshot Orbits</h1>
+  <p>Choose your starting difficulty: the number of planets in the first orbit.</p>
+  <p id="diffv">Orbit 1 has 5 planets</p>
+  <p id="diffnote">Each orbit adds one more until 20.</p>
+  <button id="btn-go">Launch</button>
+  <button id="btn-fewer">Fewer planets</button>
+  <button id="btn-more">More planets</button>
+  <button id="btn-back">Back to orbit</button>
+</div>
+<script src="physics.js"></script>
+<script src="levels.js"></script>
+<script>
+(function () {
+'use strict';
+
+// Left stick aims the slingshot, right stick is a 360 degree power dial, R1 launches.
+// Dial: up is 0 degrees (no power), left is 90 degrees (25%), down 180 (50%), right 270 (75%), and it wraps.
+// Pulling the left stick toward a direction draws the band that way, so the ship flies the opposite way.
+
+const cvs = document.getElementById('c');
+const ctx = cvs.getContext('2d');
+const menuEl = document.getElementById('menu');
+const diffV = document.getElementById('diffv');
+const diffNote = document.getElementById('diffnote');
+const btnBack = document.getElementById('btn-back');
+
+const START_X_PX = W * START_X;
+const AIM_DEAD = 0.5, DIAL_DEAD = 0.5;      // stick magnitudes below this leave the last aim or dial value in place
+const PREVIEW_EVERY = 4;                    // frames between trajectory recalculations while aiming
+const MAX_PARTICLES = 160;
+const LAUNCH_BUTTON = 5, RETRY_BUTTON = 9, MENU_BUTTON = 8;
+
+let total = 0, best = 0, startPlanets = 5;
+try { best = Number(localStorage.getItem('slingshot-best')) || 0; } catch (e) {}
+try { const v = Number(localStorage.getItem('slingshot-start')); if (v >= 1 && v <= MAX_PLANETS) startPlanets = Math.round(v); } catch (e) {}
+
+let aimAng = 0;                             // launch direction in radians (0 = right, toward the portal)
+let power = 0;                              // dial value, 0 to just under 1
+let S = null;                               // current orbit state
+let cache = null;                           // baked sprites for the orbit on screen
+let menuOpen = false;
+let prevPad = { launch: false, retry: false, menu: false };
+let pad = { launch: false, retry: false, menu: false, sx: 0, sy: 0, tx: 0, ty: 0 };
+let msgText = '', msgLeft = 0;
+let previewKey = '', previewFrame = -99, frameNo = 0;
+let stars = [];
+let background = null;
+let shake = 0;
+
+// ---------- planets, levels, sprites ----------
+function planetsFor(orbit) { return Math.min(MAX_PLANETS, startPlanets + orbit - 1); }
+function levelKey(orbit) {
+  return orbit <= 20 ? orbit + ':' + planetsFor(orbit) : (21 + (orbit - 21) % 10) + ':20';
+}
+
+function makeStars() {
+  const rnd = mulberry32(7);
+  stars = [];
+  for (let i = 0; i < 80; i++) stars.push({ x: rnd() * W, y: rnd() * H, z: 0.1 + rnd() * 0.9, tw: rnd() * TAU });
+}
+
+function bakeBackground() {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const bg = g.createRadialGradient(W * 0.5, H * 0.45, 50, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
+  bg.addColorStop(0, '#101a33');
+  bg.addColorStop(1, '#03040a');
+  g.fillStyle = bg;
+  g.fillRect(0, 0, W, H);
+  const nb = g.createRadialGradient(W * 0.7, H * 0.3, 0, W * 0.7, H * 0.3, W * 0.35);
+  nb.addColorStop(0, 'rgba(120,60,200,0.12)');
+  nb.addColorStop(1, 'rgba(120,60,200,0)');
+  g.fillStyle = nb;
+  g.fillRect(0, 0, W, H);
+  background = c;
+}
+
+// The canvas here does not paint gradients along paths, so the planet's shading is built from solid discs:
+// the disc shifts toward the light as it shrinks, which reads as a lit sphere at these sizes.
+function bakePlanet(p) {
+  const half = Math.ceil(p.r * 1.8 + 8), size = half * 2;
+  const c = document.createElement('canvas');
+  c.width = size; c.height = size;
+  const g = c.getContext('2d');
+  const cx = half, cy = half;
+  for (let i = 4; i >= 1; i--) {                       // soft glow: faint discs stacked outward
+    g.fillStyle = 'hsla(' + p.hue + ',90%,60%,0.08)';
+    g.beginPath(); g.arc(cx, cy, p.r * (1 + 0.12 * i), 0, TAU); g.fill();
+  }
+  const steps = 10;
+  for (let i = 0; i < steps; i++) {
+    const k = i / (steps - 1);                          // 0 at the rim, 1 at the highlight
+    const rr = p.r * (1 - 0.92 * k), off = p.r * 0.35 * k;
+    g.fillStyle = 'hsl(' + p.hue + ',' + Math.round(60 - 10 * k) + '%,' + Math.round(12 + 60 * k) + '%)';
+    g.beginPath(); g.arc(cx - off, cy - off, rr, 0, TAU); g.fill();
+  }
+  g.fillStyle = 'hsla(' + (p.hue + 20) + ',50%,80%,0.08)';   // cloud bands, cut to the disc
+  for (let i = -2; i <= 2; i++) {
+    const dy = i * p.r * 0.28, w = Math.sqrt(Math.max(0, p.r * p.r - dy * dy));
+    if (w > 0) g.fillRect(cx - w, cy + dy, 2 * w, p.r * 0.1);
+  }
+  if (p.ring) {
+    g.save();
+    g.translate(cx, cy);
+    g.rotate(p.tilt);
+    g.scale(1, 0.32);
+    g.beginPath(); g.arc(0, 0, p.r * 1.7, 0, TAU);
+    g.lineWidth = p.r * 0.22;
+    g.strokeStyle = 'hsla(' + (p.hue + 40) + ',60%,75%,0.35)';
+    g.stroke();
+    g.restore();
+  }
+  return { canvas: c, x: p.x - half, y: p.y - half };
+}
+
+// All rocks are drawn as one mass: outlines first, fills on top, so only the outer edge shows.
+function bakeRocks(rocks) {
+  if (!rocks.length) return null;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  for (const r of rocks) {
+    x0 = Math.min(x0, r.x - r.r - 6); y0 = Math.min(y0, r.y - r.r - 6);
+    x1 = Math.max(x1, r.x + r.r + 6); y1 = Math.max(y1, r.y + r.r + 6);
+  }
+  x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+  x1 = Math.min(W, Math.ceil(x1)); y1 = Math.min(H, Math.ceil(y1));
+  const c = document.createElement('canvas');
+  c.width = x1 - x0; c.height = y1 - y0;
+  const g = c.getContext('2d');
+  g.translate(-x0, -y0);
+  g.lineJoin = 'round';
+  const path = (r) => {
+    g.beginPath();
+    for (let i = 0; i < 11; i++) {
+      const a = i / 11 * TAU + r.seed;
+      const rr = r.r * (0.95 + 0.1 * Math.sin(i * 2.7 + r.seed));
+      const x = r.x + Math.cos(a) * rr, y = r.y + Math.sin(a) * rr;
+      if (i === 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.closePath();
+  };
+  g.strokeStyle = 'rgba(255,140,90,0.55)';
+  g.lineWidth = 4;
+  for (const r of rocks) { path(r); g.stroke(); }
+  g.fillStyle = '#3a3430';
+  for (const r of rocks) { path(r); g.fill(); }
+  g.fillStyle = 'rgba(255,255,255,0.035)';
+  for (const r of rocks) { g.beginPath(); g.arc(r.x - r.r * 0.25, r.y - r.r * 0.25, r.r * 0.55, 0, TAU); g.fill(); }
+  return { canvas: c, x: x0, y: y0 };
+}
+
+// Builds (or reuses) the sprites for orbit n. The level data itself is read-only; dust state is reset each load.
+function levelFor(n) {
+  const key = levelKey(n);
+  const raw = window.SLINGSHOT_LEVELS && window.SLINGSHOT_LEVELS[key];
+  if (!raw) return null;
+  if (!cache || cache.key !== key) {
+    const planets = raw.planets.map(a => ({ x: a[0], y: a[1], r: a[2], m: a[3], hue: a[4], ring: a[5] === 1, tilt: a[6], spin: a[7] }));
+    const rocks = raw.rocks.map(a => ({ x: a[0], y: a[1], r: a[2], seed: a[3] }));
+    cache = {
+      key,
+      planets,
+      rocks,
+      goal: { x: raw.goal[0], y: raw.goal[1] },
+      start: { x: START_X_PX, y: H * 0.5 },
+      sol: { vx: raw.sol[0], vy: raw.sol[1], tol: raw.sol[2], strict: raw.sol[3] === 1, shortcuts: raw.sol[4] },
+      dustRaw: raw.dust,
+      planetSprites: planets.map(bakePlanet),
+      rockSprite: bakeRocks(rocks),
+    };
+  }
+  return {
+    orbit: n, L: cache,
+    dust: cache.dustRaw.map(a => ({ x: a[0], y: a[1], ph: a[2], got: false })),
+  };
+}
+
+// ---------- orbit state ----------
+function resetShip() {
+  S.ship.x = S.L.start.x; S.ship.y = S.L.start.y;
+  S.ship.vx = 0; S.ship.vy = 0;
+  S.state = 'idle'; S.trail = []; S.heading = aimAng;
+}
+
+function loadOrbit(n) {
+  const level = levelFor(n);
+  if (!level) { showMsg('No level for orbit ' + n, 2000); return; }
+  S = {
+    orbit: n, L: level.L, dust: level.dust, dustGot: 0,
+    ship: { x: level.L.start.x, y: level.L.start.y, vx: 0, vy: 0 },
+    heading: aimAng, state: 'idle', shots: SHOTS, trail: [],
+    deadT: 0, winT: 0, flyT: 0, acc: 0, particles: [],
+  };
+  S.preview = null;
+  previewKey = '';
+  showMsg('Orbit ' + n + '  |  ' + level.L.planets.length + ' planet' + (level.L.planets.length === 1 ? '' : 's'), 2200);
+}
+
+function launch(vx, vy) {
+  S.shots--;
+  S.ship.vx = vx; S.ship.vy = vy;
+  S.heading = Math.atan2(vy, vx);
+  S.trail = []; S.acc = 0; S.flyT = 0;
+  S.state = 'flying';
+}
+
+function physicsStep() {
+  const sh = S.ship, L = S.L;
+  let ax = 0, ay = 0;
+  for (const p of L.planets) {
+    const dx = p.x - sh.x, dy = p.y - sh.y;
+    const d2 = dx * dx + dy * dy + SOFT * SOFT;
+    const k = G * p.m / (d2 * Math.sqrt(d2));
+    ax += dx * k; ay += dy * k;
+  }
+  sh.vx += ax * DT; sh.vy += ay * DT;
+  sh.x += sh.vx * DT; sh.y += sh.vy * DT;
+  S.heading = Math.atan2(sh.vy, sh.vx);
+
+  S.trail.push(sh.x, sh.y);
+  if (S.trail.length > 360) S.trail.splice(0, 2);
+
+  for (const d of S.dust) {
+    if (!d.got && (d.x - sh.x) ** 2 + (d.y - sh.y) ** 2 < 22 * 22) {
+      d.got = true; S.dustGot++;
+      burst(d.x, d.y, 14, 48, 140);
+    }
+  }
+
+  if ((sh.x - L.goal.x) ** 2 + (sh.y - L.goal.y) ** 2 < GOAL_R * GOAL_R) { win(); return; }
+
+  for (const p of L.planets) {
+    if ((sh.x - p.x) ** 2 + (sh.y - p.y) ** 2 < (p.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false); return; }
+  }
+  for (const r of L.rocks) {
+    if ((sh.x - r.x) ** 2 + (sh.y - r.y) ** 2 < (r.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false); return; }
+  }
+  if (sh.x < SHIP_R || sh.x > W - SHIP_R || sh.y < SHIP_R || sh.y > H - SHIP_R) {
+    crash(Math.min(W - SHIP_R, Math.max(SHIP_R, sh.x)), Math.min(H - SHIP_R, Math.max(SHIP_R, sh.y)), false, 'Out of bounds');
+  }
+}
+
+function crash(x, y, silent, msg) {
+  S.state = 'dead'; S.deadT = 1.1;
+  if (!silent) {
+    burst(x, y, 70, 12, 360);
+    shake = 0.8;
+    showMsg(msg || 'Impact', 900);
+  } else {
+    showMsg('Lost in space', 900);
+  }
+}
+
+function win() {
+  S.state = 'won'; S.winT = 2.6;
+  const bonus = 500 + S.shots * 250 + S.dustGot * 100;
+  total += bonus;
+  if (total > best) {
+    best = total;
+    try { localStorage.setItem('slingshot-best', String(best)); } catch (e) {}
+  }
+  burst(S.L.goal.x, S.L.goal.y, 120, 190, 260);
+  showMsg('Orbit clear  +' + bonus, 2400);
+}
+
+function update(dt) {
+  if (S.state === 'flying') {
+    S.flyT += dt;
+    if (S.flyT > MAX_FLIGHT) crash(S.ship.x, S.ship.y, true);
+    S.acc += dt;
+    while (S.state === 'flying' && S.acc >= DT) { S.acc -= DT; physicsStep(); }
+  } else if (S.state === 'dead') {
+    S.deadT -= dt;
+    if (S.deadT <= 0) {
+      if (S.shots > 0) resetShip();
+      else { showMsg('Out of shots, retry', 1400); loadOrbit(S.orbit); }
+    }
+  } else if (S.state === 'won') {
+    S.winT -= dt;
+    if (S.winT <= 0) loadOrbit(S.orbit + 1);
+  }
+  for (const p of S.particles) {
+    p.life -= dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vx *= 0.97; p.vy *= 0.97;
+  }
+  if (S.particles.length) S.particles = S.particles.filter(p => p.life > 0);
+}
+
+// ---------- input: read the pad each frame, act on presses and stick positions ----------
+function readPad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : null;
+  const p = pads && pads[0] ? pads[0] : null;
+  const pressed = (i) => !!(p && p.buttons[i] && p.buttons[i].pressed);
+  const axis = (i) => (p && p.axes && p.axes[i]) || 0;
+  pad.launch = pressed(LAUNCH_BUTTON);
+  pad.retry = pressed(RETRY_BUTTON);
+  pad.menu = pressed(MENU_BUTTON);
+  pad.sx = axis(0); pad.sy = axis(1);       // left stick
+  pad.tx = axis(2); pad.ty = axis(3);       // right stick (dial)
+}
+
+function applyAim() {
+  if (Math.hypot(pad.sx, pad.sy) > AIM_DEAD) aimAng = Math.atan2(-pad.sy, -pad.sx);
+  if (Math.hypot(pad.tx, pad.ty) > DIAL_DEAD) {
+    const a = Math.atan2(-pad.ty, pad.tx) - Math.PI / 2;   // up is 0, and angles increase counter-clockwise
+    power = ((a % TAU) + TAU) % TAU / TAU;
+  }
+}
+
+function aimVelocity() {
+  const m = VMAX * power;
+  return { vx: Math.cos(aimAng) * m, vy: Math.sin(aimAng) * m };
+}
+
+function updatePreview() {
+  const v = aimVelocity();
+  const key = Math.round(v.vx * 4) + ',' + Math.round(v.vy * 4);
+  if (key === previewKey || frameNo - previewFrame < PREVIEW_EVERY) return;
+  previewKey = key; previewFrame = frameNo;
+  const rec = [];
+  const res = sim(S.L, v.vx, v.vy, rec);
+  S.preview = { rec, res };
+}
+
+function handleInput(dt) {
+  if (menuOpen) return;
+  if (pad.menu && !prevPad.menu) { openMenu(); return; }
+  if (!S) return;
+  if (pad.retry && !prevPad.retry && S.state !== 'won') { loadOrbit(S.orbit); return; }
+  applyAim();
+  if (S.state === 'idle') {
+    if (power > 0.01 && S.shots > 0) {
+      updatePreview();
+      if (pad.launch && !prevPad.launch) {
+        const v = aimVelocity();
+        launch(v.vx, v.vy);
+      }
+    } else {
+      S.preview = null;
+    }
+  }
+}
+
+// ---------- menu ----------
+function openMenu() {
+  menuOpen = true;
+  menuEl.style.display = 'block';
+  btnBack.style.display = S ? '' : 'none';
+  syncMenu();
+}
+
+function closeMenu() {
+  menuOpen = false;
+  menuEl.style.display = 'none';
+}
+
+function syncMenu() {
+  diffV.textContent = 'Orbit 1 has ' + startPlanets + ' planet' + (startPlanets === 1 ? '' : 's');
+  diffNote.textContent = startPlanets >= MAX_PLANETS ? 'Every orbit has 20 planets.' : 'Each orbit adds one more until 20.';
+}
+
+function setPlanets(v) {
+  startPlanets = Math.max(1, Math.min(MAX_PLANETS, v));
+  syncMenu();
+}
+
+function startGame() {
+  try { localStorage.setItem('slingshot-start', String(startPlanets)); } catch (e) {}
+  total = 0;
+  closeMenu();
+  shake = 0;
+  loadOrbit(1);
+}
+
+document.getElementById('btn-go').addEventListener('click', startGame);
+document.getElementById('btn-fewer').addEventListener('click', () => setPlanets(startPlanets - 1));
+document.getElementById('btn-more').addEventListener('click', () => setPlanets(startPlanets + 1));
+btnBack.addEventListener('click', closeMenu);
+btnBack.style.display = 'none';
+syncMenu();
+
+// ---------- effects ----------
+function burst(x, y, n, hue, speed) {
+  for (let i = 0; i < n && S.particles.length < MAX_PARTICLES; i++) {
+    const a = Math.random() * TAU, s = speed * (0.3 + Math.random() * 0.7);
+    S.particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0.5 + Math.random() * 0.9, max: 1.4, hue: hue + Math.random() * 30 - 15 });
+  }
+}
+
+function showMsg(text, ms) {
+  msgText = text;
+  msgLeft = ms / 1000;
+}
+
+// ---------- drawing ----------
+function drawPath(rec, rgb, alpha, dashed, endRes) {
+  if (rec.length < 4) return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(' + rgb + ',' + alpha + ')';
+  ctx.lineWidth = 2;
+  ctx.setLineDash(dashed ? [4, 8] : []);
+  ctx.beginPath();
+  ctx.moveTo(rec[0], rec[1]);
+  for (let i = 2; i < rec.length; i += 12) ctx.lineTo(rec[i], rec[i + 1]);
+  ctx.stroke();
+  if (endRes === -1) {
+    const x = rec[rec.length - 2], y = rec[rec.length - 1];
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6);
+    ctx.moveTo(x + 6, y - 6); ctx.lineTo(x - 6, y + 6);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawPortal(t) {
+  const g = S.L.goal;
+  ctx.save();
+  ctx.translate(g.x, g.y);
+  ctx.scale(0.9, 0.9);
+  for (let i = 0; i < 3; i++) {
+    ctx.save();
+    ctx.rotate(t * (0.6 + i * 0.35) * (i % 2 ? -1 : 1));
+    ctx.strokeStyle = 'hsla(' + (185 + i * 25) + ',100%,72%,' + (0.95 - i * 0.2).toFixed(2) + ')';
+    ctx.lineWidth = 3 - i * 0.5;
+    ctx.beginPath();
+    ctx.arc(0, 0, GOAL_R - i * 5, 0.15, Math.PI * 1.7);
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.fillStyle = 'rgba(120,255,255,0.12)';
+  ctx.beginPath(); ctx.arc(0, 0, GOAL_R - 8, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+function drawDust(d, t) {
+  const s = 0.7 + 0.3 * Math.sin(t * 3 + d.ph);
+  ctx.save();
+  ctx.translate(d.x, d.y);
+  ctx.rotate(t * 0.8 + d.ph);
+  ctx.fillStyle = '#ffe9a0';
+  ctx.beginPath();
+  ctx.moveTo(0, -6 * s); ctx.lineTo(4 * s, 0); ctx.lineTo(0, 6 * s); ctx.lineTo(-4 * s, 0);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawShip() {
+  const sh = S.ship;
+  ctx.save();
+  ctx.translate(sh.x, sh.y);
+  ctx.rotate(S.heading);
+  if (S.state === 'flying') {
+    ctx.fillStyle = 'rgba(255,170,90,0.8)';
+    ctx.beginPath();
+    ctx.moveTo(-4, -2.5); ctx.lineTo(-14 - Math.random() * 6, 0); ctx.lineTo(-4, 2.5);
+    ctx.fill();
+  }
+  ctx.fillStyle = '#eaf6ff';
+  ctx.beginPath();
+  ctx.moveTo(12, 0); ctx.lineTo(-8, 6.5); ctx.lineTo(-3.5, 0); ctx.lineTo(-8, -6.5);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawAim() {
+  const len = 26 + 60 * power;
+  const cx = S.ship.x, cy = S.ship.y;
+  if (S.preview) {
+    const res = S.preview.res;
+    const rgb = res === 1 ? '120,255,170' : res === -1 ? '255,110,110' : '255,200,110';
+    drawPath(S.preview.rec, rgb, 0.9, true, res);
+  }
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(aimAng) * len, cy + Math.sin(aimAng) * len);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,200,110,0.9)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 22, -Math.PI / 2, -Math.PI / 2 + TAU * power);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawDial() {
+  const cx = 52, cy = 428, r = 26;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(120,170,255,0.35)';
+  ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,200,110,0.95)';
+  ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + TAU * power); ctx.stroke();
+  const a = -Math.PI / 2 + TAU * power;
+  ctx.fillStyle = '#eaf6ff';
+  ctx.beginPath(); ctx.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 4, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#d9e6ff';
+  ctx.font = '14px sans-serif';
+  ctx.fillText('POWER ' + Math.round(power * 100) + '%', cx + 38, cy + 5);
+  ctx.restore();
+}
+
+function drawHud() {
+  ctx.save();
+  ctx.fillStyle = '#d9e6ff';
+  ctx.font = '14px sans-serif';
+  const items = ['ORBIT ' + S.orbit, 'SHOTS ' + S.shots, 'PLANETS ' + S.L.planets.length,
+    'STARDUST ' + S.dustGot + '/' + S.dust.length, 'SCORE ' + total, 'BEST ' + best];
+  let x = 18;
+  for (const text of items) { ctx.fillText(text, x, 24); x += ctx.measureText(text).width + 22; }
+  ctx.restore();
+}
+
+function drawHelp() {
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.fillStyle = '#d9e6ff';
+  ctx.font = '12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Left stick aim | Right stick power | R1 launch | Start retry | Select menu', W / 2, H - 10);
+  ctx.restore();
+}
+
+function drawMessage() {
+  if (msgLeft <= 0 || !msgText) return;
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, msgLeft / 0.35);
+  ctx.fillStyle = '#ffd08a';
+  ctx.font = '26px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(msgText, W / 2, H * 0.38);
+  ctx.restore();
+}
+
+function draw(t) {
+  ctx.save();
+  if (shake > 0) ctx.translate((Math.random() - 0.5) * shake * 16, (Math.random() - 0.5) * shake * 16);
+  ctx.drawImage(background, 0, 0);
+
+  for (const s of stars) {
+    const x = ((s.x - t * 12 * s.z) % W + W) % W;
+    const a = (0.4 + 0.6 * Math.abs(Math.sin(t * 1.3 + s.tw))) * s.z;
+    ctx.fillStyle = 'rgba(200,220,255,' + a.toFixed(3) + ')';
+    ctx.fillRect(x, s.y, s.z * 2.2, s.z * 2.2);
+  }
+
+  if (!S) { ctx.restore(); return; }
+  const L = S.L;
+
+  for (const p of L.planets) {
+    for (let i = 0; i < 1; i++) {
+      const ph = (t * 0.35 + i * 0.5 + p.x * 0.001) % 1;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r + ph * 150, 0, TAU);
+      ctx.strokeStyle = 'hsla(' + p.hue + ',80%,70%,' + (0.16 * (1 - ph)).toFixed(3) + ')';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    }
+  }
+
+  ctx.strokeStyle = 'rgba(255,90,90,0.55)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
+
+  for (const s of L.planetSprites) ctx.drawImage(s.canvas, s.x, s.y);
+  if (L.rockSprite) ctx.drawImage(L.rockSprite.canvas, L.rockSprite.x, L.rockSprite.y);
+  drawPortal(t);
+  for (const d of S.dust) if (!d.got) drawDust(d, t);
+
+  if (S.state === 'idle') drawAim();
+
+  const tr = S.trail;
+  if (tr.length > 4) {
+    ctx.lineWidth = 2;
+    for (let i = 2; i < tr.length; i += 6) {
+      const a = i / tr.length;
+      ctx.strokeStyle = 'rgba(120,200,255,' + (a * 0.7).toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.moveTo(tr[i - 2], tr[i - 1]);
+      ctx.lineTo(tr[i], tr[i + 1]);
+      ctx.stroke();
+    }
+  }
+
+  if (S.state !== 'dead') drawShip();
+
+  for (const p of S.particles) {
+    const a = Math.max(0, Math.min(1, p.life / p.max));
+    ctx.fillStyle = 'hsla(' + p.hue + ',100%,65%,' + a.toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.2 + a * 2.2, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  drawHud();
+  if (S.state === 'idle' || S.state === 'flying') drawDial();
+  drawHelp();
+  drawMessage();
+}
+
+// ---------- main loop: fixed-step physics, one draw per frame ----------
+let last = null;
+function frame(now) {
+  frameNo++;
+  const dt = last === null ? 0 : Math.min(0.05, (now - last) / 1000);
+  last = now;
+  readPad();
+  if (msgLeft > 0) msgLeft -= dt;
+  shake = Math.max(0, shake - dt * 2.2);
+  if (!menuOpen && S) update(dt);
+  handleInput(dt);
+  prevPad = { launch: pad.launch, retry: pad.retry, menu: pad.menu };
+  draw(now / 1000);
+  requestAnimationFrame(frame);
+}
+
+// Read-only status for tests and debugging: window.slingshotStatus() returns null before the first launch.
+window.slingshotStatus = () => S ? {
+  orbit: S.orbit, state: S.state, shots: S.shots, planets: S.L.planets.length, dust: S.dustGot,
+  total, best, aim: aimAng, power, x: S.ship.x, y: S.ship.y, menu: menuOpen,
+} : null;
+
+makeStars();
+bakeBackground();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -499,6 +499,24 @@ class InputState:
         self._validate_action(action)
         return any(source[0] != "key" for source in self._sources[action])
 
+    STICK_AXES = {"left": (0, 1), "right": (2, 3)}
+
+    def stick(self, name: str) -> tuple[float, float]:
+        """Analog deflection of a stick as (x, y), each -1 to 1, y positive down.
+
+        "left" reads axes 0 and 1 and "right" reads axes 2 and 3, the same axes the default pad map uses.
+        Reads the first connected pad live; (0.0, 0.0) when no pad or no such axes.
+        """
+        if name not in self.STICK_AXES:
+            raise ValueError(f"Unknown stick: {name}")
+        x_axis, y_axis = self.STICK_AXES[name]
+        for joystick in self._joysticks.values():
+            try:
+                return float(joystick.get_axis(x_axis)), float(joystick.get_axis(y_axis))
+            except (pygame.error, AttributeError, ValueError):
+                return 0.0, 0.0
+        return 0.0, 0.0
+
     def pressed(self, action: str) -> bool:
         self._validate_action(action)
         return action in self._pressed

@@ -14,7 +14,7 @@
 
 Each game folder contains main.py defining create_game(), which returns an object with draw(surface) and optional update(dt, inputs) and handle_event(event). The runtime owns the loop and display. Games must not initialize Pygame, create a window, poll the event queue, or create a second loop.
 
-Logical actions: up, down, left, right, a, b, x, y, start, select, guide, l1, r1, l2, r2, l3, r3, rs_up, rs_down, rs_left, rs_right. Use inputs.down(action) for held state, inputs.pressed(action) for a press edge, and inputs.released(action) for a release edge. Physical controller mappings are provisional until verified on the actual handheld.
+Logical actions: up, down, left, right, a, b, x, y, start, select, guide, l1, r1, l2, r2, l3, r3, rs_up, rs_down, rs_left, rs_right. Use inputs.down(action) for held state, inputs.pressed(action) for a press edge, and inputs.released(action) for a release edge. Physical controller mappings are provisional until verified on the actual handheld. Analog sticks: `inputs.stick("left")` and `inputs.stick("right")` return `(x, y)` from -1 to 1 with y positive down, read live from the first connected pad (axes 0 and 1 left, 2 and 3 right, the default pad map).
 
 ## Folder layout and manifest
 
@@ -113,6 +113,8 @@ The engine is built like a small console, to fit a 1 GB handheld with most of th
 `sgba_ui.json` options: `navigation`, `hotkeys`, `color_depth` (16|32), `image_depth` (16|32), `rle` (true|false), `image_budget_mb`, `alpha` (`"threshold"` cuts faint anti-aliased edges on sprites to on/off transparency, `"keep"` preserves them), `preload`.
 
 Writing for the engine: avoid `getImageData`/`putImageData` (forces slow drawing), avoid per-frame full-screen translucent overlays and gradients (they are blended pixel by pixel), prefer sprite sheets under a few thousand pixels wide, and keep sound files under a few MB.
+
+Canvas limits found while porting Slingshot Orbits: gradient fills work only for `fillRect` and text. `fill()` and `stroke()` on a path with a gradient draw nothing, so shade discs with solid concentric arcs or bake them once into an offscreen canvas. `setLineDash` is a no-op (dashes draw solid), and `globalCompositeOperation` supports only `source-over`, `source-in`, `source-atop`, `lighter` and `multiply` (`destination-in` draws as `source-over`). On a JavaScript game, the page sees sticks through `navigator.getGamepads()[0].axes`: axes 0 and 1 left stick, 2 and 3 right stick, analog where the stick is pushed and -1, 0 or 1 from the d-pad or keys otherwise.
 
 ### Browser games as packages and bundles
 
