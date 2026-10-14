@@ -15,11 +15,14 @@ const STEPS = [
 const NAV = ['up', 'down', 'left', 'right', 'a', 'b', 'start'];
 const BTN = { a: 0, b: 1, x: 2, y: 3, l1: 4, r1: 5, l2: 6, r2: 7, select: 8, start: 9, l3: 10, r3: 11, up: 12, down: 13, left: 14, right: 15 };
 let prev = {}, now = {};
+let armed = false;
 function readPad() {
   prev = now; now = {};
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   const p = pads && pads[0];
   for (const k of NAV) now[k] = !!(p && p.buttons[BTN[k]] && p.buttons[BTN[k]].pressed);
+  // A button still held from whatever started us (EmulationStation's A press) is not a choice: wait until everything is released once.
+  if (!armed) { if (!NAV.some((k) => now[k])) armed = true; for (const k of NAV) now[k] = false; }
 }
 const pressed = (k) => now[k] && !prev[k];
 
@@ -97,7 +100,9 @@ function startMenu() {
   } else {
     title = 'SGBA'; footer = 'Up/Down: choose    A: start    In a game: Start+Select opens the menu'; back = null;
     entries = [];
-    for (const gme of JSON.parse(__sgba_list_games())) entries.push({ label: gme.title, run: () => __sgba_action('launch:' + gme.path) });
+    const found = JSON.parse(__sgba_list_games());
+    found.sort((x, y) => x.title.localeCompare(y.title));
+    for (const gme of found) entries.push({ label: gme.title, run: () => __sgba_action('launch:' + gme.path) });
     if (!entries.length) entries.push({ label: 'No games found. Put game folders in the games folder.', run: () => {} });
     entries.push({ label: 'Controller setup', run: startWizard }, { label: 'Quit', run: () => __sgba_action('quit') });
   }

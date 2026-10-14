@@ -53,14 +53,28 @@ static void json_quoted(char **buf, size_t *len, size_t *cap, const char *s) {
     json_put(buf, len, cap, "\"");
 }
 
+static int g_first_game;
+
+static void add_game(char **out, size_t *len, size_t *cap, const char *path, const char *title) {
+    if (!g_first_game) json_put(out, len, cap, ",");
+    g_first_game = 0;
+    json_put(out, len, cap, "{\"path\":");
+    json_quoted(out, len, cap, path);
+    json_put(out, len, cap, ",\"title\":");
+    json_quoted(out, len, cap, title);
+    json_put(out, len, cap, "}");
+}
+
+/* Games come from sgba/games (the demo and input lab, or anything put there) and from the packages of the games installed next to the
+ * emulator: every "<name>-game" folder beside SGBA.sh that holds a .sgba file (Parry Perry, Slingshot Orbits). */
 NATIVE(n_list_games) {
     char *out = NULL; size_t len = 0, cap = 0;
     json_put(&out, &len, &cap, "[");
+    g_first_game = 1;
     if (g_app) {
         char dir[2300];
         snprintf(dir, sizeof dir, "%s/games", g_app->app_dir);
         DIR *d = opendir(dir);
-        int first = 1;
         struct dirent *e;
         while (d && (e = readdir(d))) {
             if (e->d_name[0] == '.') continue;
@@ -74,16 +88,37 @@ NATIVE(n_list_games) {
             else if (stat(index, &st) != 0) continue;
             Config cfg = {0};
             if (!packaged) config_load(path, &cfg);
-            if (!first) json_put(&out, &len, &cap, ",");
-            first = 0;
-            json_put(&out, &len, &cap, "{\"path\":");
-            json_quoted(&out, &len, &cap, path);
-            json_put(&out, &len, &cap, ",\"title\":");
-            json_quoted(&out, &len, &cap, packaged ? ptitle : (cfg.title ? cfg.title : e->d_name));
-            json_put(&out, &len, &cap, "}");
+            add_game(&out, &len, &cap, path, packaged ? ptitle : (cfg.title ? cfg.title : e->d_name));
             if (!packaged) config_free(&cfg);
         }
         if (d) closedir(d);
+        char parent[2300];
+        snprintf(parent, sizeof parent, "%s", g_app->app_dir);
+        char *slash = strrchr(parent, '/');
+        if (slash && slash != parent) {
+            *slash = 0;
+            DIR *pd = opendir(parent);
+            struct dirent *pe;
+            while (pd && (pe = readdir(pd))) {
+                size_t nl = strlen(pe->d_name);
+                if (nl <= 5 || strcmp(pe->d_name + nl - 5, "-game") != 0) continue;
+                char sub[2600];
+                snprintf(sub, sizeof sub, "%s/%s", parent, pe->d_name);
+                DIR *sd = opendir(sub);
+                struct dirent *se;
+                while (sd && (se = readdir(sd))) {
+                    size_t fl = strlen(se->d_name);
+                    if (fl <= 5 || strcmp(se->d_name + fl - 5, ".sgba") != 0) continue;
+                    char path[2700], ptitle[200] = "";
+                    snprintf(path, sizeof path, "%s/%s", sub, se->d_name);
+                    if (!pkg_is_package(path)) continue;
+                    if (pkg_title(path, ptitle, sizeof ptitle) != 0) snprintf(ptitle, sizeof ptitle, "%s", se->d_name);
+                    add_game(&out, &len, &cap, path, ptitle);
+                }
+                if (sd) closedir(sd);
+            }
+            if (pd) closedir(pd);
+        }
     }
     json_put(&out, &len, &cap, "]");
     JSValue v = JS_NewString(ctx, out);
