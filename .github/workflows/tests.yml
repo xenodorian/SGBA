@@ -54,20 +54,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install ARM64 emulation
-        run: sudo apt-get update && sudo apt-get install -y qemu-user libc6-arm64-cross gcc-aarch64-linux-gnu
-      - name: Build ArkOS bundle
-        run: python tools/build_bundle.py arkos-aarch64 --controls controls-arkos.json
-      - name: Run the test suite with the bundled ARM64 Python and pygame
-        env:
-          QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
-          SDL_VIDEODRIVER: dummy
-          SDL_AUDIODRIVER: dummy
-          PYTHONNOUSERSITE: "1"
+      - name: Install zig (pinned, packaged compiler)
+        run: python -m pip install ziglang==0.17.0
+      # The emulator is the native C runtime (native/): no Python on the device, no games of its own.
+      # The Python runtime stays in the repo for development and the web preview; its tests run in the job above.
+      - name: Build the ArkOS emulator package (native runtime)
+        run: python tools/build_native_emulator.py arkos-aarch64 --controls controls-arkos.json
+      - name: Check the package
         run: |
-          APP="$PWD/dist/SGBA-arkos-aarch64/sgba"
-          cd "$APP"
-          PYTHONPATH="$APP/site:$APP" qemu-aarch64 python/bin/python3.11 -m unittest discover -s "$GITHUB_WORKSPACE/tests" -v
+          unzip -l dist/SGBA-arkos-aarch64.zip
+          unzip -l dist/SGBA-arkos-aarch64.zip | grep -q "sgba/sgba$"
+          unzip -l dist/SGBA-arkos-aarch64.zip | grep -q "sgba/controls.json"
+          ! unzip -l dist/SGBA-arkos-aarch64.zip | grep -q "python"
       - uses: actions/upload-artifact@v4
         with:
           name: SGBA-arkos-aarch64

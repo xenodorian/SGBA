@@ -30,13 +30,15 @@ ARKOS_LAUNCHER = r'''#!/bin/bash
 # SGBA launcher for ArkOS handhelds. Everything it needs is in the "sgba" folder next to it.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 APP="$HERE/sgba"
+ARG1="$1"       # a game path given relative to where we were started must survive the cd below
+if [ -n "$ARG1" ] && [ -e "$ARG1" ]; then ARG1="$(cd "$(dirname "$ARG1")" && pwd)/$(basename "$ARG1")"; fi
 cd "$APP" || exit 1
 LOG="$APP/sgba_launch.log"
 echo "=== launch $(date) ===" >> "$LOG" 2>&1
 chmod +x "$APP/sgba" 2>/dev/null
 [ -w /dev/tty1 ] && printf '\033c' > /dev/tty1 2>/dev/null
 export HOME="${HOME:-$APP}"
-GAME="${1:-@GAME@}"
+GAME="${ARG1:-@GAME@}"
 
 run() {
   # $1 = SDL2 library to force, or empty for the device's own
