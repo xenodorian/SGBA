@@ -229,3 +229,14 @@ Done in `native/`:
 - D-pad swapped: up/down = power, left/right = aim rotation (B = fine). Game-only change.
 - The native runtime change that exposed analog stick axes (3b95703) was reverted: after that build the owner reported the emulator and every game exiting back to the menu on the R36S. It could not be reproduced on PC or under qemu (aarch64, headless, ASAN input harness, Parry Perry with axis input), so the cause is unconfirmed. native/src/input.c, input.h and main.c are back to e995c8f (the last build confirmed working on the device).
 - To retry sticks later: get sgba/sgba.log and sgba/sgba_launch.log from the device after a failed launch first.
+
+## Diagnostics: reports, crash handler, frame statistics (native runtime)
+- `native/src/report.c`. Files go to `<emulator folder>/reports/` (on the card: `sgba/reports/`):
+  - `sessions.log`: one line per game session (secs, loops, avg/max loop ms, on-time %, late/slow/stalled counts, rss, JS errors, fps, build, how it ended). Capped near 48 KB.
+  - `crash-<epoch>.txt`: written from the signal handler (SEGV, BUS, ILL, FPE, ABRT) with signal, fault address, backtrace (`sgba+0xOFFSET` is the position inside the build) and the last 48 log lines. Verified on x86 and on aarch64 under qemu (zig glibc 2.17).
+  - `unclean-<time>.txt`: next start finds `.running` (rewritten every 10 s, removed on a clean exit) and reports the old state plus the `sgba.log` tail. Covers kill, power loss, hangs.
+  - `errors-<time>.txt`: a session that logged errors (JS exceptions are logged as errors).
+  - `failed-<time>.txt`: SGBA returned a non-zero code outside a game.
+  - Newest 20 `.txt` reports are kept; uploaded ones move to `reports/sent/`.
+- All games run inside SGBA, so they are covered; the game name is in every report. The build id is the git short hash (`SGBA_BUILD`).
+- Test: `native/tests/reports_test.sh` (hooks: `SGBA_TEST_CRASH_AT_START=1`). Not measured on the device.

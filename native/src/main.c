@@ -15,6 +15,7 @@
 #include "natives.h"
 #include "platform.h"
 #include "input.h"
+#include "report.h"
 #include <stdlib.h>
 
 typedef struct { int frame; char action[16]; int down; } PadEvent;
@@ -117,6 +118,7 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
     const Surf *surface = NULL;
     double last = now_ms(), acc = 0, t_update = 0, t_draw = 0, t_present = 0;
     long frames = 0, updates = 0, all_frames = 0;
+    double last_tick = now_ms();
     int keys_listened = 0, armed = 0;
     char pads[4096], neutral[4096];
     int result = END_QUIT;
@@ -154,6 +156,7 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
         double t = now_ms();
         double elapsed = t - last;
         last = t;
+        if (is_game) { report_frame(elapsed); if (t - last_tick > 10000) { last_tick = t; report_tick(rss_mb(), host_error_count(h)); } }
         if (elapsed > 250) elapsed = 250;
         acc += elapsed;
         if (acc > step_ms * 5) acc = step_ms * 5;
@@ -277,6 +280,7 @@ static int run_interactive(const char *game, const char *save, const char *app_d
         Host *h = host_create(folder, save_file);
         if (host_load_page(h, "index.html") != 0) { host_destroy(h); break; }
         g_app->choice[0] = 0;
+        report_session_begin(launch, 1000.0 / (host_config(h)->fps > 0 ? host_config(h)->fps : 60));
         int over = 0;
         while (!over) {
             int rc = run_loop(disp, in, h, 1, max_seconds, &started);
@@ -286,6 +290,8 @@ static int run_interactive(const char *game, const char *save, const char *app_d
             if (!strcmp(g_app->choice, "quit")) { over = 1; break; }
             canvas_force_full(host_natives(h));                                         /* resume: repaint everything */
         }
+        report_tick(rss_mb(), host_error_count(h));
+        report_session_end(over == 1 ? "quit" : "closed");
         host_destroy(h);
         if (over == 2 || game) break;                                                   /* window closed, or a direct launch ended */
     }
@@ -328,7 +334,9 @@ int main(int argc, char **argv) {
 #else
         mkdir(dir, 0755);
 #endif
+        report_init(app);
         int rc = run_interactive(game, save, app, fullscreen, seconds);
+        report_shutdown(rc);
         free(app);
         return rc;
     }

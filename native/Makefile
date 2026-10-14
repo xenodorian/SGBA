@@ -68,6 +68,9 @@ $(OUT)/overlay_data.o: $(OUT)/overlay_data.c
 $(OUT)/qjs_%.o: $(ROOT)/vendor/quickjs/%.c | $(OUT)
 	$(CC) $(QJS_CFLAGS) -c -o $@ $<
 
+BUILD_ID := $(shell git -C $(ROOT) rev-parse --short HEAD 2>/dev/null || echo dev)
+$(OUT)/report.o: CFLAGS += -DSGBA_BUILD=\"$(BUILD_ID)\"
+
 $(OUT)/%.o: $(ROOT)/src/%.c $(wildcard $(ROOT)/src/*.h) | $(OUT)
 	$(CC) $(CFLAGS) -c -o $@ $<
 

@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include "sgba.h"
 #include "json.h"
+#include "report.h"
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -30,6 +31,7 @@ void sg_log(const char *level, const char *fmt, ...) {
 #endif
     char ts[32];
     strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", &tmv);
+    report_log_line(level, buf);
     fprintf(stderr, "[%s] %s\n", level, buf);
     if (g_log) { fprintf(g_log, "%s %s %s\n", ts, level, buf); fflush(g_log); }
 }

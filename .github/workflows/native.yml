@@ -24,6 +24,8 @@ jobs:
         run: |
           gcc -O2 -I native/src native/tests/raster_test.c native/src/raster.c -lm -o /tmp/raster_test
           /tmp/raster_test
+      - name: Diagnostics (session lines, crash and unclean-exit reports)
+        run: native/tests/reports_test.sh
       - name: Build the R36S binary (glibc 2.17)
         run: |
           make -C native TARGET=aarch64
