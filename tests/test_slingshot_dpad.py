@@ -72,18 +72,20 @@ class SlingshotDpadTests(unittest.TestCase):
     def test_dpad_turns_aim_sets_power_and_a_launches(self):
         self.start()
         aim0, power0 = self.status()["aim"], self.status()["power"]
+        self.hold(("left",), 20)
+        self.assertLess(self.status()["aim"], aim0 - 0.3)                  # left rotates one way
+        self.hold(("right",), 40)
+        self.assertGreater(self.status()["aim"], aim0 + 0.3)               # right rotates the other way
+        self.hold(("down",), 10)
+        lowered = self.status()["power"]
+        self.assertLess(lowered, power0)                                   # down takes power away
         self.hold(("up",), 20)
-        self.assertLess(self.status()["aim"], aim0 - 0.3)                  # up turns the aim toward the top
-        self.hold(("right",), 20)
-        self.assertGreater(self.status()["power"], power0 + 0.05)          # right adds power
-        raised = self.status()["power"]
-        self.hold(("left",), 10)
-        self.assertLess(self.status()["power"], raised)                    # left takes it away
+        self.assertGreater(self.status()["power"], lowered + 0.05)         # up adds power
         before = self.status()["aim"]
-        self.hold(("down",), 20)
+        self.hold(("right",), 20)
         coarse = abs(self.status()["aim"] - before)
         before = self.status()["aim"]
-        self.hold(("down", "b"), 20)
+        self.hold(("right", "b"), 20)
         self.assertLess(abs(self.status()["aim"] - before), coarse / 2)    # B makes the same turn slow
         self.hold(("a",), 2)
         self.assertEqual(self.status()["state"], "flying")
@@ -96,7 +98,7 @@ class SlingshotDpadTests(unittest.TestCase):
 
     def test_canvas_operations_per_frame_stay_low(self):
         self.start()
-        self.hold(("up",), 30)
+        self.hold(("left",), 30)
         stats = self.game.host.stats
         ops0, frames0 = stats.ops, stats.frames
         for _ in range(120):

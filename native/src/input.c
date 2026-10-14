@@ -1,5 +1,6 @@
 /* Keyboard and pad state: the same mapping rules as the Python runtime (runtime.py InputState). */
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include "sgba.h"
 #include "input.h"
@@ -23,9 +24,11 @@ struct Input {
     int njoy;
     char raw[16][32];
     int raw_head, raw_count;
+    double axisv[8];                 /* live analog axes of the pad */
+    int amap[4];                     /* which axes are left x, left y, right x, right y (controls.json "axes"; default 0 1 2 3) */
 };
 
-Input *input_create(void) { return calloc(1, sizeof(Input)); }
+Input *input_create(void) { Input *in = calloc(1, sizeof(Input)); in->amap[0] = 0; in->amap[1] = 1; in->amap[2] = 2; in->amap[3] = 3; return in; }
 void input_free(Input *in) { if (!in) return; for (int i = 0; i < in->njoy; i++) if (in->joy[i]) sdl.JoystickClose(in->joy[i]); free(in); }
 int input_has_bindings(const Input *in) { return in->bound; }
 int input_joystick_count(const Input *in) { return in->njoy; }
@@ -81,6 +84,11 @@ int input_load_controls(Input *in, const char *path) {
         }
         in->bound = in->nbind > 0;
         ok = 1;
+    }
+    JNode *ax = json_get(root, "axes");                               /* optional: {"lx":0,"ly":1,"rx":2,"ry":3} */
+    if (ax && ax->type == J_OBJ) {
+        static const char *names[4] = { "lx", "ly", "rx", "ry" };
+        for (int k = 0; k < 4; k++) { JNode *v = json_get(ax, names[k]); if (v) { int n = (int)json_num(v, k); if (n >= 0 && n < 8) in->amap[k] = n; } }
     }
     json_free(root);
     return ok;
@@ -180,6 +188,7 @@ void input_event(Input *in, const SDL_Event *e) {
     case SDL_JOYAXISMOTION: {
         double v = e->jaxis.value / 32767.0;
         int axis = e->jaxis.axis, inst = e->jaxis.which;
+        if (axis >= 0 && axis < 8) in->axisv[axis] = v;
         if (in->bound) {
             for (int i = 0; i < in->nbind; i++) if (in->bind[i].kind == 4 && in->bind[i].a == axis) { Source s = { 4, inst, axis, in->bind[i].b }; set_source(in, in->bind[i].action, s, in->bind[i].b > 0 ? v > 0.5 : v < -0.5); }
         } else if (axis <= 5) {
@@ -190,6 +199,19 @@ void input_event(Input *in, const SDL_Event *e) {
         }
         break;
     }
+    }
+}
+
+void input_set_axis(Input *in, int index, double v) { if (index >= 0 && index < 8) in->axisv[index] = v; }
+
+/* The sticks as a page sees them: a circular dead zone, then rescaled so a full push still reads 1. */
+void input_stick_axes(const Input *in, double out[4]) {
+    for (int s = 0; s < 2; s++) {
+        double x = in->axisv[in->amap[s * 2]], y = in->axisv[in->amap[s * 2 + 1]];
+        double m = sqrt(x * x + y * y);
+        if (m < 0.22) { x = y = 0; }
+        else { double k = (m - 0.22) / (1.0 - 0.22); if (k > 1) k = 1; x = x / m * k; y = y / m * k; }
+        out[s * 2] = x; out[s * 2 + 1] = y;
     }
 }
 
@@ -205,9 +227,13 @@ void input_pad_json(const Input *in, int pad_only, char *buf, size_t size) {
         int v = input_down(in, order[i], pad_only);
         o += (size_t)snprintf(buf + o, size - o, "%s{\"pressed\":%s,\"touched\":%s,\"value\":%d}", i ? "," : "", v ? "true" : "false", v ? "true" : "false", v);
     }
-    int rx = input_down(in, A_RS_LEFT, pad_only) ? -1 : input_down(in, A_RS_RIGHT, pad_only) ? 1 : 0;
-    int ry = input_down(in, A_RS_UP, pad_only) ? -1 : input_down(in, A_RS_DOWN, pad_only) ? 1 : 0;
-    snprintf(buf + o, size - o, "],\"axes\":[0,0,%d,%d]}]", rx, ry);
+    double st[4];
+    input_stick_axes(in, st);
+    if (st[2] == 0 && st[3] == 0) {                                  /* no analog right stick: the digital one (keys or bound buttons) */
+        st[2] = input_down(in, A_RS_LEFT, pad_only) ? -1 : input_down(in, A_RS_RIGHT, pad_only) ? 1 : 0;
+        st[3] = input_down(in, A_RS_UP, pad_only) ? -1 : input_down(in, A_RS_DOWN, pad_only) ? 1 : 0;
+    }
+    snprintf(buf + o, size - o, "],\"axes\":[%.3f,%.3f,%.3f,%.3f]}]", st[0], st[1], st[2], st[3]);
 }
 
 /* SDL key -> (KeyboardEvent.key, .code, .keyCode) */

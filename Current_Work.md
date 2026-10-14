@@ -224,3 +224,9 @@ Done in `native/`:
 ### 2026-10-14: menu fixes (owner report: SGBA jumped straight into the demo; Slingshot was not listed)
 - Cause of the jump: the launcher page treated the A press that started SGBA from EmulationStation, still held when the page loaded, as "choose the first entry" (the demo). The page now ignores the pad until every button has been released once (`armed` in `native/shell/shell.html`); this also covers returning from the pause menu.
 - The list now also shows the games installed next to the emulator: every `<name>-game` folder beside `SGBA.sh` holding a `.sgba` (Parry Perry, Slingshot Orbits), plus `sgba/games` (demo, input lab). Sorted by title. The games stay their own packages; only the list is shared.
+
+## Slingshot controls and analog sticks
+- D-pad swapped: up/down = power, left/right = aim rotation (B = fine). Help text in the game updated.
+- Native runtime: raw stick axes are now stored on every joystick axis event, even when controls.json has bindings (before, they were ignored). The page sees them in `axes` as lx, ly, rx, ry with a 0.22 circular dead zone. Default axis numbers are 0,1 (left) and 2,3 (right); `"axes": {"lx":0,"ly":1,"rx":2,"ry":3}` in controls.json overrides them. If no analog right stick is present the old digital right stick values are used.
+- Headless test hook: script item `F:axis:INDEX:VALUE`.
+- Verified on PC (x86) and aarch64 under qemu: left stick sets aim, right stick dial sets power, d-pad as above. Unverified on the R36S: the real axis numbers of its sticks.

@@ -22,7 +22,7 @@
 (function () {
 'use strict';
 
-// Controls (handheld, no sticks needed): D-pad up/down turns the aim, D-pad left/right sets the power,
+// Controls (handheld, no sticks needed): D-pad left/right rotates the aim, D-pad up/down sets the power,
 // hold B for fine control, A or R1 launches, Start retries, Select opens the menu.
 // Sticks still work where a pad has them: left stick aims, right stick is a 360 degree power dial
 // (up is 0 degrees = no power, left 25%, down 50%, right 75%).
@@ -216,7 +216,7 @@ function bakeScene(L) {
   g.fillStyle = 'rgba(217,230,255,0.55)';
   g.font = '12px sans-serif';
   g.textAlign = 'center';
-  g.fillText('Up/Down aim | Left/Right power | B fine | A launch | Start retry | Select menu', W / 2, H - 10);
+  g.fillText('Up/Down power | Left/Right aim | B fine | A launch | Start retry | Select menu', W / 2, H - 10);
   return c;
 }
 
@@ -384,10 +384,10 @@ function readPad() {
 
 function applyAim(dt) {
   const f = pad.fine ? FINE : 1;
-  if (pad.up) aimAng -= AIM_RATE * f * dt;           // up turns the aim toward the top of the screen
-  if (pad.down) aimAng += AIM_RATE * f * dt;
-  if (pad.right) power = Math.min(1, power + POWER_RATE * f * dt);
-  if (pad.left) power = Math.max(0, power - POWER_RATE * f * dt);
+  if (pad.left) aimAng -= AIM_RATE * f * dt;         // left turns the aim counter-clockwise, right clockwise
+  if (pad.right) aimAng += AIM_RATE * f * dt;
+  if (pad.up) power = Math.min(1, power + POWER_RATE * f * dt);
+  if (pad.down) power = Math.max(0, power - POWER_RATE * f * dt);
   if (aimAng > Math.PI) aimAng -= TAU; else if (aimAng < -Math.PI) aimAng += TAU;
   const dpad = pad.up || pad.down || pad.left || pad.right;   // SGBA mirrors the d-pad onto the left stick axes: not a stick pull
   if (!dpad && Math.hypot(pad.sx, pad.sy) > AIM_DEAD) aimAng = Math.atan2(-pad.sy, -pad.sx);
