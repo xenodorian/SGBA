@@ -24,6 +24,7 @@ struct ImageStore {
 
 struct ImageStore *imagestore_create(size_t budget_bytes, int alpha_keep);
 int image_register_file(Natives *n, const char *path, int *w, int *h);     /* returns id or -1 */
+const Surf *image_surface_peek(Natives *n, int id, int *kind);                  /* cached only, thread-safe read */
 const Surf *image_surface(Natives *n, int id, int *kind);                 /* decode on demand */
 int image_size(Natives *n, int id, int *w, int *h);
 int image_kind(Natives *n, int id);                                       /* -1 if not decoded yet */

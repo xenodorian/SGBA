@@ -20,6 +20,10 @@ jobs:
           make -C native
           native/build/x86_64/sgba native/tests/smoke --frames 30 --shot /tmp/smoke.png
           test -s /tmp/smoke.png
+      - name: SIMD kernels against their scalar references
+        run: |
+          gcc -O2 -I native/src native/tests/raster_test.c native/src/raster.c -lm -o /tmp/raster_test
+          /tmp/raster_test
       - name: Build the R36S binary (glibc 2.17)
         run: |
           make -C native TARGET=aarch64

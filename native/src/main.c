@@ -9,6 +9,7 @@
 #define STBI_WRITE_NO_STDIO
 #include "stb_image_write.h"
 #include "sgba.h"
+#include "pool.h"
 #include "pkg.h"
 #include "canvas.h"
 #include "natives.h"
@@ -295,6 +296,7 @@ done:
 }
 
 int main(int argc, char **argv) {
+    pool_init();
     const char *game = NULL, *save = NULL, *script = "9999:a", *shot = NULL;
     int frames = 0, njs = 0, fullscreen = 0;
     double seconds = 0;

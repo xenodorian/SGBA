@@ -7,6 +7,7 @@
  */
 #include <ctype.h>
 #include <math.h>
+#include "pool.h"
 #include "canvas.h"
 #include "image.h"
 #include "json.h"
@@ -305,8 +306,16 @@ static IRect cv_bounds(const Canvas *c) { return irect(0, 0, c->surf->w, c->surf
 
 /* ---------------------------------------------------------------- running ops */
 
+/* Worker threads of a parallel repaint only read caches that were filled beforehand. A miss there is flagged and the region is
+ * repainted again on one thread. */
+static __thread int t_peek;
+static volatile int g_mt_miss;
+
 static const Surf *source_surf(Natives *n, int id, int *kind) {
-    if (id >= IMAGE_ID_BASE) return image_surface(n, id, kind);
+    if (id >= IMAGE_ID_BASE) {
+        if (t_peek) { const Surf *sp = image_surface_peek(n, id, kind); if (!sp) g_mt_miss = 1; return sp; }
+        return image_surface(n, id, kind);
+    }
     Canvas *s = cv_get(n, id);
     if (!s) return NULL;
     *kind = KIND_ALPHA;
@@ -337,21 +346,28 @@ static void run_op(Natives *n, Canvas *c, const Op *o, const IRect *region) {
     case OP_GRAD: {
         IRect rect = irect(o->i[0], o->i[1], o->i[2], o->i[3]);
         IRect r = irect_clip(rect, clip);
+        if (irect_empty(r)) break;
         int lvl = o->i[4];
         const Gradient *g = o->grad;
         int vertical = g->linear && fabs(g->a[3] - g->a[1]) >= fabs(g->a[2] - g->a[0]);     /* colour depends only on the row */
-        int horizontal = g->linear && !vertical;
+        int horizontal = g->linear && !vertical;                                             /* colour depends only on the column */
+        uint32_t *buf = vertical ? NULL : malloc(sizeof(uint32_t) * (size_t)r.w);
+        if (horizontal)
+            for (int x = 0; x < r.w; x++) { uint32_t gc = grad_at(g, rect.x, rect.y, rect.w, rect.h, r.x + x, r.y); buf[x] = (gc & 0x00FFFFFFu) | ((uint32_t)(PA(gc) * lvl / 255) << 24); }
         for (int y = r.y; y < r.y + r.h; y++) {
-            uint32_t *row = d->px + (size_t)y * d->w;
-            uint32_t rowc = vertical ? grad_at(g, rect.x, rect.y, rect.w, rect.h, rect.x, y) : 0;
-            for (int x = r.x; x < r.x + r.w; x++) {
-                uint32_t gc = vertical ? rowc : grad_at(g, rect.x, rect.y, rect.w, rect.h, x, y);
-                (void)horizontal;
+            uint32_t *row = d->px + (size_t)y * d->w + r.x;
+            if (vertical) {
+                uint32_t gc = grad_at(g, rect.x, rect.y, rect.w, rect.h, rect.x, y);
                 int a = PA(gc) * lvl / 255;
-                if (!a) continue;
-                row[x] = r_comp_px((gc & 0x00FFFFFFu) | ((uint32_t)a << 24), row[x], o->comp);
+                if (a) r_fill_blend(d, irect(r.x, y, r.w, 1), (gc & 0x00FFFFFFu) | ((uint32_t)a << 24), o->comp);
+                continue;
             }
+            if (!horizontal)
+                for (int x = 0; x < r.w; x++) { uint32_t gc = grad_at(g, rect.x, rect.y, rect.w, rect.h, r.x + x, y); buf[x] = (gc & 0x00FFFFFFu) | ((uint32_t)(PA(gc) * lvl / 255) << 24); }
+            if (o->comp == COMP_SRC_IN) { for (int x = 0; x < r.w; x++) if (PA(buf[x])) row[x] = r_comp_px(buf[x], row[x], o->comp); }
+            else r_span_comp(row, buf, r.w, o->comp);
         }
+        free(buf);
         break;
     }
     case OP_IMAGE: {
@@ -368,8 +384,8 @@ static void run_op(Natives *n, Canvas *c, const Op *o, const IRect *region) {
         r_lines(d, o->iv, o->niv / 2, o->i[0], o->i[1], o->color, o->comp, clip);
         break;
     case OP_TEXT: {
-        const Mask *m = text_mask(o->text, o->i[0], o->i[1], o->i[2]);
-        if (!m) return;
+        const Mask *m = t_peek ? text_mask_peek(o->text, o->i[0], o->i[1], o->i[2]) : text_mask(o->text, o->i[0], o->i[1], o->i[2]);
+        if (!m) { if (t_peek) g_mt_miss = 1; return; }
         if (o->grad) {
             IRect dest = irect_clip(irect(o->i[3], o->i[4], m->w, m->h), clip);
             for (int y = dest.y; y < dest.y + dest.h; y++) {
@@ -842,6 +858,48 @@ static void out_push(IRect *out, int *count, int max, IRect r) {
     else { out[max - 1] = irect_union(out[max - 1], r); }
 }
 
+/* Repaint one region from op `start`. Big regions are cut into horizontal strips that the pool paints on every CPU core: the strips
+ * do not overlap, and every op only reads shared data. Images and text the strips need are loaded first on this thread. */
+typedef struct { Natives *n; Canvas *c; OpList *ops; int start; IRect region; int nstrips; } Replay;
+
+static void replay_strip(void *vp, int k) {
+    Replay *rp = vp;
+    int y0 = rp->region.y + (int)((int64_t)rp->region.h * k / rp->nstrips), y1 = rp->region.y + (int)((int64_t)rp->region.h * (k + 1) / rp->nstrips);
+    IRect strip = irect(rp->region.x, y0, rp->region.w, y1 - y0);
+    t_peek = 1;
+    for (int i = rp->start; i < rp->ops->n; i++) {
+        const Op *o = rp->ops->v[i];
+        if (irect_collide(o->box, strip)) run_op(rp->n, rp->c, o, &strip);
+    }
+    t_peek = 0;
+}
+
+static void replay_region(Natives *n, Canvas *c, OpList *ops, int start, IRect region) {
+    int threads = pool_threads();
+    long area = (long)region.w * region.h;
+    if (threads < 2 || area < 30000 || region.h < 48) {
+        for (int i = start; i < ops->n; i++) if (irect_collide(ops->v[i]->box, region)) run_op(n, c, ops->v[i], &region);
+        return;
+    }
+    for (int i = start; i < ops->n; i++) {                   /* load what the strips will read */
+        const Op *o = ops->v[i];
+        if (!irect_collide(o->box, region)) continue;
+        int k;
+        if (o->kind == OP_IMAGE || o->kind == OP_SHEAR || o->kind == OP_ROT) source_surf(n, o->i[0], &k);
+        else if (o->kind == OP_TEXT) text_mask(o->text, o->i[0], o->i[1], o->i[2]);
+    }
+    int nstrips = region.h / 24;
+    if (nstrips > 4 * threads) nstrips = 4 * threads;
+    if (nstrips < 2) nstrips = 2;
+    Replay rp = { n, c, ops, start, region, nstrips };
+    g_mt_miss = 0;
+    pool_run(replay_strip, &rp, nstrips);
+    if (g_mt_miss) {                                         /* something was evicted while loading: paint the region again, alone */
+        g_mt_miss = 0;
+        for (int i = start; i < ops->n; i++) if (irect_collide(ops->v[i]->box, region)) run_op(n, c, ops->v[i], &region);
+    }
+}
+
 /* Draw one recorded frame; appends the changed regions to out. */
 static void composite(Natives *n, Canvas *c, OpList *ops, IRect *out, int *count, int max) {
     IRect full = cv_bounds(c);
@@ -889,10 +947,8 @@ static void composite(Natives *n, Canvas *c, OpList *ops, IRect *out, int *count
             const Op *o = ops->v[i];
             if (o->covers && irect_contains(o->box, region)) { start = i; break; }
         }
-        for (int i = start; i < ops->n; i++) {
-            const Op *o = ops->v[i];
-            if (irect_collide(o->box, region)) { run_op(n, c, o, &region); st_replayed++; }
-        }
+        for (int i = start; i < ops->n; i++) if (irect_collide(ops->v[i]->box, region)) st_replayed++;
+        replay_region(n, c, ops, start, region);
         out_push(out, count, max, region);
     }
     free(regions.v);

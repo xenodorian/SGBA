@@ -49,4 +49,15 @@ void r_lines(Surf *d, const int *pts, int n, int closed, int width, uint32_t col
 /* Alpha mask (8-bit coverage, w*h) painted with colour c. */
 void r_mask(Surf *d, const uint8_t *mask, int mw, int mh, int dx, int dy, uint32_t c, int comp, IRect clip);
 
+
+/* Span kernels (SSE2 / NEON), and their scalar references for the differential test. mode: 0 straight alpha, 1 opaque source, 2 colour key. */
+void r_span_over(uint32_t *dp, const uint32_t *sp, int n, int ga, int mode);
+void r_span_over_ref(uint32_t *dp, const uint32_t *sp, int n, int ga, int mode);
+void r_span_fill_over(uint32_t *dp, int n, uint32_t c);
+void r_span_fill_over_ref(uint32_t *dp, int n, uint32_t c);
+void r_span_fill_comp(uint32_t *dp, int n, uint32_t c, int comp);
+void r_span_fill_comp_ref(uint32_t *dp, int n, uint32_t c, int comp);
+void r_span_comp(uint32_t *dp, const uint32_t *sp, int n, int comp);     /* per-pixel colours with their own alpha */
+void r_span_comp_ref(uint32_t *dp, const uint32_t *sp, int n, int comp);
+
 #endif

@@ -9,7 +9,7 @@ OUT := $(ROOT)/build/$(TARGET)
 # and cross builds Windows without a separate toolchain. "aarch64-gcc" is the plain distro cross compiler (newer glibc, tests only).
 ZIG ?= python3 -m ziglang cc
 ifeq ($(TARGET),aarch64)
-  CC := $(ZIG) -target aarch64-linux-gnu.2.17
+  CC := $(ZIG) -target aarch64-linux-gnu.2.17 -mcpu=cortex_a35      # the R36S SoC (RK3326): tuning only, same ISA as any aarch64
   LIBS := -ldl -lm -lpthread
   LDFLAGS := -s
 else ifeq ($(TARGET),aarch64-gcc)
@@ -24,8 +24,8 @@ else
   CC ?= gcc
   LIBS := -ldl -lm -lpthread
 endif
-CFLAGS := -MMD -MP -O2 -g -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -I$(ROOT)/src -I$(ROOT)/vendor/quickjs -I$(ROOT)/vendor/sdl2 -I$(ROOT)/vendor/stb
-QJS_CFLAGS := -O2 -D_GNU_SOURCE -w
+CFLAGS := -MMD -MP -O3 -fno-plt -g -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -I$(ROOT)/src -I$(ROOT)/vendor/quickjs -I$(ROOT)/vendor/sdl2 -I$(ROOT)/vendor/stb
+QJS_CFLAGS := -O3 -DNDEBUG -D_GNU_SOURCE -w
 SRC := $(wildcard $(ROOT)/src/*.c)
 OBJ := $(patsubst $(ROOT)/src/%.c,$(OUT)/%.o,$(SRC)) $(OUT)/shim_data.o $(OUT)/font_data.o $(OUT)/shell_data.o $(OUT)/overlay_data.o
 QJS := $(addprefix $(OUT)/qjs_,quickjs.o libregexp.o libunicode.o dtoa.o)

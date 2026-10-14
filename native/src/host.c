@@ -118,6 +118,7 @@ Host *host_create(const char *root, const char *save_path) {
     config_load(root, &h->cfg);
     h->rt = JS_NewRuntime();
     JS_SetMemoryLimit(h->rt, 96u * 1024 * 1024);
+    JS_SetGCThreshold(h->rt, 24u * 1024 * 1024);        /* QuickJS frees most objects by reference count; the cycle collector rarely needs to interrupt a frame */
     JS_SetMaxStackSize(h->rt, 2u * 1024 * 1024);
     h->ctx = JS_NewContext(h->rt);
     JS_SetContextOpaque(h->ctx, h);

@@ -81,6 +81,14 @@ static Slot g_cache[CACHE_SLOTS];
 static unsigned long g_tick = 0;
 static size_t g_bytes = 0;
 
+/* Cached mask only, without touching the cache: safe from several threads while nothing inserts or evicts. */
+const Mask *text_mask_peek(const char *utf8, int font_px, int bold, int italic) {
+    char keybuf[600];
+    snprintf(keybuf, sizeof keybuf, "%d/%d/%d/%.500s", font_px, bold, italic, utf8);
+    for (int i = 0; i < CACHE_SLOTS; i++) if (g_cache[i].key && !strcmp(g_cache[i].key, keybuf)) return &g_cache[i].m;
+    return NULL;
+}
+
 const Mask *text_mask(const char *utf8, int font_px, int bold, int italic) {
     if (!font_ready()) return NULL;
     char keybuf[600];

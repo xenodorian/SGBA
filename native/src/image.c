@@ -95,6 +95,15 @@ static void evict(struct ImageStore *s, size_t need) {
     }
 }
 
+/* Already-decoded image, no decode and no bookkeeping: safe to call from several threads while nothing loads or evicts. */
+const Surf *image_surface_peek(Natives *n, int id, int *kind) {
+    struct ImageStore *s = n->images;
+    int i = id - IMAGE_ID_BASE;
+    if (i < 0 || i >= s->count || !s->e[i].surf) return NULL;
+    if (kind) *kind = s->e[i].kind;
+    return s->e[i].surf;
+}
+
 const Surf *image_surface(Natives *n, int id, int *kind) {
     struct ImageStore *s = n->images;
     int i = id - IMAGE_ID_BASE;
