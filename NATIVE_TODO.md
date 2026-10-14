@@ -30,7 +30,7 @@ pushing and noting after each.
 
 ## C. Retire Python (not yet; only on the owner's word)
 
-- [ ] C1. Remove the Python runtime from both bundles once B2 passes and the device run is confirmed
+- [x] C1. (owner word, 2026-10-14: "ditch Python entirely") The published ArkOS emulator package is now the native runtime: `tools/build_native_emulator.py`, no Python on the device. The device run is still unconfirmed. The Python runtime stays in the repo for development, the web preview and the tests.
 - [ ] C2. Move the build and test tools off Python if wanted
 
 ## D. Later, after the emulator work (game changes, from the owner)
