@@ -22,9 +22,12 @@
 (function () {
 'use strict';
 
-// Left stick aims the slingshot, right stick is a 360 degree power dial, R1 launches.
-// Dial: up is 0 degrees (no power), left is 90 degrees (25%), down 180 (50%), right 270 (75%), and it wraps.
-// Pulling the left stick toward a direction draws the band that way, so the ship flies the opposite way.
+// Controls (handheld, no sticks needed): D-pad up/down turns the aim, D-pad left/right sets the power,
+// hold B for fine control, A or R1 launches, Start retries, Select opens the menu.
+// Sticks still work where a pad has them: left stick aims, right stick is a 360 degree power dial
+// (up is 0 degrees = no power, left 25%, down 50%, right 75%).
+// Speed: everything that does not move is baked once per orbit into one layer (see bakeScene), collisions use a
+// lookup grid, and the trajectory preview is computed a slice per frame, because a frame is the unit of cost here.
 
 const cvs = document.getElementById('c');
 const ctx = cvs.getContext('2d');
@@ -35,23 +38,29 @@ const btnBack = document.getElementById('btn-back');
 
 const START_X_PX = W * START_X;
 const AIM_DEAD = 0.5, DIAL_DEAD = 0.5;      // stick magnitudes below this leave the last aim or dial value in place
-const PREVIEW_EVERY = 4;                    // frames between trajectory recalculations while aiming
-const MAX_PARTICLES = 160;
-const LAUNCH_BUTTON = 5, RETRY_BUTTON = 9, MENU_BUTTON = 8;
+const PREVIEW_STEPS = 140;                  // physics steps of the preview computed per frame (a full path is MAX_STEPS)
+const PREVIEW_STRIDE = 8;                   // the preview line uses every 8th step
+const MAX_PARTICLES = 64;
+const GRID = 8, GW = Math.ceil(WORLD_W / GRID), GH = Math.ceil(WORLD_H / GRID);   // collision lookup grid
+const LAUNCH_BUTTON = 5, RETRY_BUTTON = 9, MENU_BUTTON = 8, A_BUTTON = 0, B_BUTTON = 1;
+const DPAD_UP = 12, DPAD_DOWN = 13, DPAD_LEFT = 14, DPAD_RIGHT = 15;
+const AIM_RATE = 1.3, POWER_RATE = 0.45, FINE = 0.2;   // radians per second, power per second, fine-control factor
 
 let total = 0, best = 0, startPlanets = 5;
 try { best = Number(localStorage.getItem('slingshot-best')) || 0; } catch (e) {}
 try { const v = Number(localStorage.getItem('slingshot-start')); if (v >= 1 && v <= MAX_PLANETS) startPlanets = Math.round(v); } catch (e) {}
 
 let aimAng = 0;                             // launch direction in radians (0 = right, toward the portal)
-let power = 0;                              // dial value, 0 to just under 1
+let power = 0.5;                            // power, 0 to 1 (the dial value)
 let S = null;                               // current orbit state
 let cache = null;                           // baked sprites for the orbit on screen
 let menuOpen = false;
 let prevPad = { launch: false, retry: false, menu: false };
-let pad = { launch: false, retry: false, menu: false, sx: 0, sy: 0, tx: 0, ty: 0 };
+let pad = { launch: false, retry: false, menu: false, up: false, down: false, left: false, right: false, fine: false, sx: 0, sy: 0, tx: 0, ty: 0 };
 let msgText = '', msgLeft = 0;
-let previewKey = '', previewFrame = -99, frameNo = 0;
+let previewKey = '', frameNo = 0, pv = null;
+let launchLock = true;                      // set when a menu closes: the press that chose Launch must not also fire a shot
+let hudKey = '', hudCanvas = null, dialKey = '';
 let stars = [];
 let background = null;
 let shake = 0;
@@ -158,6 +167,59 @@ function bakeRocks(rocks) {
   return { canvas: c, x: x0, y: y0 };
 }
 
+// Planets as one flat array [x, y, G*m, ...]: the gravity loop is the hot loop and plain indexing is the fastest thing QuickJS does.
+function flatPlanets(planets) {
+  const a = new Float64Array(planets.length * 3);
+  planets.forEach((p, i) => { a[i * 3] = p.x; a[i * 3 + 1] = p.y; a[i * 3 + 2] = G * p.m; });
+  return a;
+}
+
+// 1 where a ship could touch a planet or rock, 0 where it cannot: most steps then skip the exact tests.
+function bakeGrid(planets, rocks) {
+  const g = new Uint8Array(GW * GH);
+  const mark = (x, y, r) => {
+    const x0 = Math.max(0, Math.floor((x - r) / GRID)), x1 = Math.min(GW - 1, Math.floor((x + r) / GRID));
+    const y0 = Math.max(0, Math.floor((y - r) / GRID)), y1 = Math.min(GH - 1, Math.floor((y + r) / GRID));
+    for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) g[cy * GW + cx] = 1;
+  };
+  for (const p of planets) mark(p.x, p.y, p.r + SHIP_R + 2);
+  for (const r of rocks) mark(r.x, r.y, r.r + SHIP_R + 2);
+  return g;
+}
+
+// Everything on screen that does not move, drawn once per orbit into one opaque layer:
+// background, stars, faint orbit rings, the red border, planets, rocks, the portal glow and the help line.
+function bakeScene(L) {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.drawImage(background, 0, 0);
+  for (const s of stars) {
+    const a = 0.3 + 0.5 * s.z;
+    g.fillStyle = 'rgba(200,220,255,' + a.toFixed(2) + ')';
+    g.fillRect(s.x, s.y, s.z * 2.2, s.z * 2.2);
+  }
+  for (const p of L.planets) {
+    g.beginPath();
+    g.arc(p.x, p.y, p.r + 70, 0, TAU);
+    g.strokeStyle = 'hsla(' + p.hue + ',80%,70%,0.07)';
+    g.lineWidth = 1.2;
+    g.stroke();
+  }
+  g.strokeStyle = 'rgba(255,90,90,0.55)';
+  g.lineWidth = 3;
+  g.strokeRect(1.5, 1.5, W - 3, H - 3);
+  for (const s of L.planetSprites) g.drawImage(s.canvas, s.x, s.y);
+  if (L.rockSprite) g.drawImage(L.rockSprite.canvas, L.rockSprite.x, L.rockSprite.y);
+  g.fillStyle = 'rgba(120,255,255,0.12)';
+  g.beginPath(); g.arc(L.goal.x * 1, L.goal.y * 1, (GOAL_R - 8) * 0.9, 0, TAU); g.fill();
+  g.fillStyle = 'rgba(217,230,255,0.55)';
+  g.font = '12px sans-serif';
+  g.textAlign = 'center';
+  g.fillText('Up/Down aim | Left/Right power | B fine | A launch | Start retry | Select menu', W / 2, H - 10);
+  return c;
+}
+
 // Builds (or reuses) the sprites for orbit n. The level data itself is read-only; dust state is reset each load.
 function levelFor(n) {
   const key = levelKey(n);
@@ -177,6 +239,9 @@ function levelFor(n) {
       planetSprites: planets.map(bakePlanet),
       rockSprite: bakeRocks(rocks),
     };
+    cache.gp = flatPlanets(planets);
+    cache.grid = bakeGrid(planets, rocks);
+    cache.scene = bakeScene(cache);
   }
   return {
     orbit: n, L: cache,
@@ -200,7 +265,7 @@ function loadOrbit(n) {
     heading: aimAng, state: 'idle', shots: SHOTS, trail: [],
     deadT: 0, winT: 0, flyT: 0, acc: 0, particles: [],
   };
-  S.preview = null;
+  S.preview = null; pv = null;
   previewKey = '';
   showMsg('Orbit ' + n + '  |  ' + level.L.planets.length + ' planet' + (level.L.planets.length === 1 ? '' : 's'), 2200);
 }
@@ -214,38 +279,43 @@ function launch(vx, vy) {
 }
 
 function physicsStep() {
-  const sh = S.ship, L = S.L;
+  const sh = S.ship, L = S.L, gp = L.gp, n = gp.length;
   let ax = 0, ay = 0;
-  for (const p of L.planets) {
-    const dx = p.x - sh.x, dy = p.y - sh.y;
+  for (let i = 0; i < n; i += 3) {
+    const dx = gp[i] - sh.x, dy = gp[i + 1] - sh.y;
     const d2 = dx * dx + dy * dy + SOFT * SOFT;
-    const k = G * p.m / (d2 * Math.sqrt(d2));
+    const k = gp[i + 2] / (d2 * Math.sqrt(d2));
     ax += dx * k; ay += dy * k;
   }
   sh.vx += ax * DT; sh.vy += ay * DT;
   sh.x += sh.vx * DT; sh.y += sh.vy * DT;
   S.heading = Math.atan2(sh.vy, sh.vx);
 
-  S.trail.push(sh.x, sh.y);
-  if (S.trail.length > 360) S.trail.splice(0, 2);
+  if ((S.tick = (S.tick || 0) + 1) % 3 === 0) {            // the trail keeps every third step
+    S.trail.push(sh.x, sh.y);
+    if (S.trail.length > 240) S.trail.splice(0, 2);
+  }
 
   for (const d of S.dust) {
     if (!d.got && (d.x - sh.x) ** 2 + (d.y - sh.y) ** 2 < 22 * 22) {
       d.got = true; S.dustGot++;
-      burst(d.x, d.y, 14, 48, 140);
+      burst(d.x, d.y, 10, 48, 140);
     }
   }
 
   if ((sh.x - L.goal.x) ** 2 + (sh.y - L.goal.y) ** 2 < GOAL_R * GOAL_R) { win(); return; }
 
-  for (const p of L.planets) {
-    if ((sh.x - p.x) ** 2 + (sh.y - p.y) ** 2 < (p.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false); return; }
-  }
-  for (const r of L.rocks) {
-    if ((sh.x - r.x) ** 2 + (sh.y - r.y) ** 2 < (r.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false); return; }
-  }
   if (sh.x < SHIP_R || sh.x > W - SHIP_R || sh.y < SHIP_R || sh.y > H - SHIP_R) {
     crash(Math.min(W - SHIP_R, Math.max(SHIP_R, sh.x)), Math.min(H - SHIP_R, Math.max(SHIP_R, sh.y)), false, 'Out of bounds');
+    return;
+  }
+  if (L.grid[Math.floor(sh.y / GRID) * GW + Math.floor(sh.x / GRID)]) {
+    for (const p of L.planets) {
+      if ((sh.x - p.x) ** 2 + (sh.y - p.y) ** 2 < (p.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false); return; }
+    }
+    for (const r of L.rocks) {
+      if ((sh.x - r.x) ** 2 + (sh.y - r.y) ** 2 < (r.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false); return; }
+    }
   }
 }
 
@@ -302,15 +372,25 @@ function readPad() {
   const p = pads && pads[0] ? pads[0] : null;
   const pressed = (i) => !!(p && p.buttons[i] && p.buttons[i].pressed);
   const axis = (i) => (p && p.axes && p.axes[i]) || 0;
-  pad.launch = pressed(LAUNCH_BUTTON);
+  pad.launch = pressed(LAUNCH_BUTTON) || pressed(A_BUTTON);
   pad.retry = pressed(RETRY_BUTTON);
   pad.menu = pressed(MENU_BUTTON);
+  pad.up = pressed(DPAD_UP); pad.down = pressed(DPAD_DOWN);
+  pad.left = pressed(DPAD_LEFT); pad.right = pressed(DPAD_RIGHT);
+  pad.fine = pressed(B_BUTTON);
   pad.sx = axis(0); pad.sy = axis(1);       // left stick
   pad.tx = axis(2); pad.ty = axis(3);       // right stick (dial)
 }
 
-function applyAim() {
-  if (Math.hypot(pad.sx, pad.sy) > AIM_DEAD) aimAng = Math.atan2(-pad.sy, -pad.sx);
+function applyAim(dt) {
+  const f = pad.fine ? FINE : 1;
+  if (pad.up) aimAng -= AIM_RATE * f * dt;           // up turns the aim toward the top of the screen
+  if (pad.down) aimAng += AIM_RATE * f * dt;
+  if (pad.right) power = Math.min(1, power + POWER_RATE * f * dt);
+  if (pad.left) power = Math.max(0, power - POWER_RATE * f * dt);
+  if (aimAng > Math.PI) aimAng -= TAU; else if (aimAng < -Math.PI) aimAng += TAU;
+  const dpad = pad.up || pad.down || pad.left || pad.right;   // SGBA mirrors the d-pad onto the left stick axes: not a stick pull
+  if (!dpad && Math.hypot(pad.sx, pad.sy) > AIM_DEAD) aimAng = Math.atan2(-pad.sy, -pad.sx);
   if (Math.hypot(pad.tx, pad.ty) > DIAL_DEAD) {
     const a = Math.atan2(-pad.ty, pad.tx) - Math.PI / 2;   // up is 0, and angles increase counter-clockwise
     power = ((a % TAU) + TAU) % TAU / TAU;
@@ -322,14 +402,42 @@ function aimVelocity() {
   return { vx: Math.cos(aimAng) * m, vy: Math.sin(aimAng) * m };
 }
 
+// The preview is the real flight, computed PREVIEW_STEPS per frame and restarted whenever the aim changes,
+// so a long path never costs one long frame. What is computed so far is drawn while the rest catches up.
 function updatePreview() {
   const v = aimVelocity();
   const key = Math.round(v.vx * 4) + ',' + Math.round(v.vy * 4);
-  if (key === previewKey || frameNo - previewFrame < PREVIEW_EVERY) return;
-  previewKey = key; previewFrame = frameNo;
-  const rec = [];
-  const res = sim(S.L, v.vx, v.vy, rec);
-  S.preview = { rec, res };
+  if (key !== previewKey || !pv) {
+    previewKey = key;
+    pv = { x: S.L.start.x, y: S.L.start.y, vx: v.vx, vy: v.vy, s: 0, rec: [S.L.start.x, S.L.start.y], res: 0, done: false };
+  }
+  if (pv.done) return;
+  const L = S.L, gp = L.gp, n = gp.length, grid = L.grid, SS = SOFT * SOFT;
+  let x = pv.x, y = pv.y, vx = pv.vx, vy = pv.vy, s = pv.s, res = 0;
+  const end = Math.min(MAX_STEPS, s + PREVIEW_STEPS), rec = pv.rec;
+  for (; s < end; s++) {
+    let ax = 0, ay = 0;
+    for (let i = 0; i < n; i += 3) {
+      const dx = gp[i] - x, dy = gp[i + 1] - y;
+      const d2 = dx * dx + dy * dy + SS;
+      const k = gp[i + 2] / (d2 * Math.sqrt(d2));
+      ax += dx * k; ay += dy * k;
+    }
+    vx += ax * DT; vy += ay * DT;
+    x += vx * DT; y += vy * DT;
+    if (s % PREVIEW_STRIDE === 0) rec.push(x, y);
+    if ((x - L.goal.x) ** 2 + (y - L.goal.y) ** 2 < GOAL_R * GOAL_R) { res = 1; break; }
+    if (x < SHIP_R || x > W - SHIP_R || y < SHIP_R || y > H - SHIP_R) { res = -1; break; }
+    if (grid[Math.floor(y / GRID) * GW + Math.floor(x / GRID)]) {
+      for (const p of L.planets) if ((x - p.x) ** 2 + (y - p.y) ** 2 < (p.r + SHIP_R) ** 2) res = -1;
+      if (!res) for (const r of L.rocks) if ((x - r.x) ** 2 + (y - r.y) ** 2 < (r.r + SHIP_R) ** 2) { res = -1; break; }
+      if (res) break;
+    }
+  }
+  pv.x = x; pv.y = y; pv.vx = vx; pv.vy = vy; pv.s = s;
+  if (res) { pv.res = res; pv.done = true; rec.push(x, y); }
+  else if (s >= MAX_STEPS) pv.done = true;
+  S.preview = pv;
 }
 
 function handleInput(dt) {
@@ -337,16 +445,17 @@ function handleInput(dt) {
   if (pad.menu && !prevPad.menu) { openMenu(); return; }
   if (!S) return;
   if (pad.retry && !prevPad.retry && S.state !== 'won') { loadOrbit(S.orbit); return; }
-  applyAim();
+  applyAim(dt);
+  if (!pad.launch) launchLock = false;
   if (S.state === 'idle') {
     if (power > 0.01 && S.shots > 0) {
       updatePreview();
-      if (pad.launch && !prevPad.launch) {
+      if (pad.launch && !prevPad.launch && !launchLock) {
         const v = aimVelocity();
         launch(v.vx, v.vy);
       }
     } else {
-      S.preview = null;
+      S.preview = null; pv = null; previewKey = '';
     }
   }
 }
@@ -360,7 +469,7 @@ function openMenu() {
 }
 
 function closeMenu() {
-  menuOpen = false;
+  menuOpen = false; launchLock = true;
   menuEl.style.display = 'none';
 }
 
@@ -403,75 +512,65 @@ function showMsg(text, ms) {
 }
 
 // ---------- drawing ----------
-function drawPath(rec, rgb, alpha, dashed, endRes) {
+// Per frame only what moves is drawn, and each thing is one or two canvas calls (the scene itself is one drawImage).
+const PCOLORS = [];                          // particle colours: 4 hues x 4 alpha steps, built once
+const PHUES = [12, 48, 120, 190];
+for (let h = 0; h < 4; h++) { PCOLORS.push([]); for (let a = 0; a < 4; a++) PCOLORS[h].push('hsla(' + PHUES[h] + ',100%,65%,' + ((a + 1) / 4).toFixed(2) + ')'); }
+const TRAIL_STYLE = ['rgba(120,200,255,0.18)', 'rgba(120,200,255,0.4)', 'rgba(120,200,255,0.65)'];
+const PORTAL_STYLE = ['hsla(185,100%,72%,0.95)', 'hsla(210,100%,72%,0.75)', 'hsla(235,100%,72%,0.55)'];
+
+function drawPreview(rec, rgb, endRes) {
   if (rec.length < 4) return;
-  ctx.save();
-  ctx.strokeStyle = 'rgba(' + rgb + ',' + alpha + ')';
+  ctx.strokeStyle = 'rgba(' + rgb + ',0.8)';
   ctx.lineWidth = 2;
-  ctx.setLineDash(dashed ? [4, 8] : []);
   ctx.beginPath();
   ctx.moveTo(rec[0], rec[1]);
-  for (let i = 2; i < rec.length; i += 12) ctx.lineTo(rec[i], rec[i + 1]);
+  for (let i = 2; i < rec.length; i += 2) ctx.lineTo(rec[i], rec[i + 1]);
   ctx.stroke();
   if (endRes === -1) {
     const x = rec[rec.length - 2], y = rec[rec.length - 1];
-    ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(x - 6, y - 6); ctx.lineTo(x + 6, y + 6);
     ctx.moveTo(x + 6, y - 6); ctx.lineTo(x - 6, y + 6);
     ctx.stroke();
   }
-  ctx.restore();
 }
 
 function drawPortal(t) {
   const g = S.L.goal;
-  ctx.save();
-  ctx.translate(g.x, g.y);
-  ctx.scale(0.9, 0.9);
+  ctx.lineWidth = 3;
   for (let i = 0; i < 3; i++) {
-    ctx.save();
-    ctx.rotate(t * (0.6 + i * 0.35) * (i % 2 ? -1 : 1));
-    ctx.strokeStyle = 'hsla(' + (185 + i * 25) + ',100%,72%,' + (0.95 - i * 0.2).toFixed(2) + ')';
-    ctx.lineWidth = 3 - i * 0.5;
+    const rot = t * (0.6 + i * 0.35) * (i % 2 ? -1 : 1);
+    ctx.strokeStyle = PORTAL_STYLE[i];
     ctx.beginPath();
-    ctx.arc(0, 0, GOAL_R - i * 5, 0.15, Math.PI * 1.7);
+    ctx.arc(g.x, g.y, (GOAL_R - i * 5) * 0.9, rot + 0.15, rot + Math.PI * 1.7);
     ctx.stroke();
-    ctx.restore();
   }
-  ctx.fillStyle = 'rgba(120,255,255,0.12)';
-  ctx.beginPath(); ctx.arc(0, 0, GOAL_R - 8, 0, TAU); ctx.fill();
-  ctx.restore();
 }
 
 function drawDust(d, t) {
-  const s = 0.7 + 0.3 * Math.sin(t * 3 + d.ph);
-  ctx.save();
-  ctx.translate(d.x, d.y);
-  ctx.rotate(t * 0.8 + d.ph);
-  ctx.fillStyle = '#ffe9a0';
+  const s = 0.7 + 0.3 * Math.sin(t * 3 + d.ph), a = t * 0.8 + d.ph;
+  const c = Math.cos(a), n = Math.sin(a);
+  const pt = (px, py) => ctx.lineTo(d.x + px * c - py * n, d.y + px * n + py * c);
   ctx.beginPath();
-  ctx.moveTo(0, -6 * s); ctx.lineTo(4 * s, 0); ctx.lineTo(0, 6 * s); ctx.lineTo(-4 * s, 0);
+  ctx.moveTo(d.x + 0 * c + 6 * s * n, d.y - 6 * s * c);
+  pt(4 * s, 0); pt(0, 6 * s); pt(-4 * s, 0);
   ctx.closePath(); ctx.fill();
-  ctx.restore();
 }
 
 function drawShip() {
-  const sh = S.ship;
-  ctx.save();
-  ctx.translate(sh.x, sh.y);
-  ctx.rotate(S.heading);
+  const sh = S.ship, c = Math.cos(S.heading), n = Math.sin(S.heading);
+  const pt = (px, py) => [sh.x + px * c - py * n, sh.y + px * n + py * c];
   if (S.state === 'flying') {
+    const a = pt(-4, -2.5), b = pt(-14 - (frameNo % 5) * 1.2, 0), d = pt(-4, 2.5);
     ctx.fillStyle = 'rgba(255,170,90,0.8)';
-    ctx.beginPath();
-    ctx.moveTo(-4, -2.5); ctx.lineTo(-14 - Math.random() * 6, 0); ctx.lineTo(-4, 2.5);
-    ctx.fill();
+    ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.lineTo(d[0], d[1]); ctx.fill();
   }
+  const p0 = pt(12, 0), p1 = pt(-8, 6.5), p2 = pt(-3.5, 0), p3 = pt(-8, -6.5);
   ctx.fillStyle = '#eaf6ff';
   ctx.beginPath();
-  ctx.moveTo(12, 0); ctx.lineTo(-8, 6.5); ctx.lineTo(-3.5, 0); ctx.lineTo(-8, -6.5);
+  ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.lineTo(p3[0], p3[1]);
   ctx.closePath(); ctx.fill();
-  ctx.restore();
 }
 
 function drawAim() {
@@ -479,10 +578,8 @@ function drawAim() {
   const cx = S.ship.x, cy = S.ship.y;
   if (S.preview) {
     const res = S.preview.res;
-    const rgb = res === 1 ? '120,255,170' : res === -1 ? '255,110,110' : '255,200,110';
-    drawPath(S.preview.rec, rgb, 0.9, true, res);
+    drawPreview(S.preview.rec, res === 1 ? '120,255,170' : res === -1 ? '255,110,110' : '255,200,110', res);
   }
-  ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,0.45)';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -494,12 +591,10 @@ function drawAim() {
   ctx.beginPath();
   ctx.arc(cx, cy, 22, -Math.PI / 2, -Math.PI / 2 + TAU * power);
   ctx.stroke();
-  ctx.restore();
 }
 
 function drawDial() {
   const cx = 52, cy = 428, r = 26;
-  ctx.save();
   ctx.strokeStyle = 'rgba(120,170,255,0.35)';
   ctx.lineWidth = 3;
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
@@ -508,90 +603,80 @@ function drawDial() {
   const a = -Math.PI / 2 + TAU * power;
   ctx.fillStyle = '#eaf6ff';
   ctx.beginPath(); ctx.arc(cx + Math.cos(a) * r, cy + Math.sin(a) * r, 4, 0, TAU); ctx.fill();
-  ctx.fillStyle = '#d9e6ff';
-  ctx.font = '14px sans-serif';
-  ctx.fillText('POWER ' + Math.round(power * 100) + '%', cx + 38, cy + 5);
-  ctx.restore();
+  const label = 'POWER ' + Math.round(power * 100) + '%';
+  if (label !== dialKey || !dialCanvas) {                 // the label is text, so it is redrawn only when it changes
+    dialKey = label;
+    dialCanvas = dialCanvas || document.createElement('canvas');
+    dialCanvas.width = 110; dialCanvas.height = 20;
+    const g = dialCanvas.getContext('2d');
+    g.clearRect(0, 0, 110, 20);
+    g.fillStyle = '#d9e6ff';
+    g.font = '14px sans-serif';
+    g.fillText(label, 0, 14);
+  }
+  ctx.drawImage(dialCanvas, cx + 38, cy - 9);
 }
+let dialCanvas = null;
 
+// The HUD line is text, so it is baked into its own strip and redrawn only when a number changes.
 function drawHud() {
-  ctx.save();
-  ctx.fillStyle = '#d9e6ff';
-  ctx.font = '14px sans-serif';
   const items = ['ORBIT ' + S.orbit, 'SHOTS ' + S.shots, 'PLANETS ' + S.L.planets.length,
     'STARDUST ' + S.dustGot + '/' + S.dust.length, 'SCORE ' + total, 'BEST ' + best];
-  let x = 18;
-  for (const text of items) { ctx.fillText(text, x, 24); x += ctx.measureText(text).width + 22; }
-  ctx.restore();
-}
-
-function drawHelp() {
-  ctx.save();
-  ctx.globalAlpha = 0.55;
-  ctx.fillStyle = '#d9e6ff';
-  ctx.font = '12px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('Left stick aim | Right stick power | R1 launch | Start retry | Select menu', W / 2, H - 10);
-  ctx.restore();
+  const key = items.join('|');
+  if (key !== hudKey || !hudCanvas) {
+    hudKey = key;
+    hudCanvas = hudCanvas || document.createElement('canvas');
+    hudCanvas.width = W; hudCanvas.height = 34;
+    const g = hudCanvas.getContext('2d');
+    g.clearRect(0, 0, W, 34);
+    g.fillStyle = '#d9e6ff';
+    g.font = '14px sans-serif';
+    let x = 18;
+    for (const text of items) { g.fillText(text, x, 24); x += g.measureText(text).width + 22; }
+  }
+  ctx.drawImage(hudCanvas, 0, 0);
 }
 
 function drawMessage() {
   if (msgLeft <= 0 || !msgText) return;
-  ctx.save();
   ctx.globalAlpha = Math.min(1, msgLeft / 0.35);
   ctx.fillStyle = '#ffd08a';
   ctx.font = '26px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(msgText, W / 2, H * 0.38);
-  ctx.restore();
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
 }
 
 function draw(t) {
   ctx.save();
   if (shake > 0) ctx.translate((Math.random() - 0.5) * shake * 16, (Math.random() - 0.5) * shake * 16);
-  ctx.drawImage(background, 0, 0);
+  if (!S) { ctx.drawImage(background, 0, 0); ctx.restore(); return; }
+  const L = S.L;
+  ctx.drawImage(L.scene, 0, 0);
 
-  for (const s of stars) {
+  for (let i = 0; i < 8; i++) {                        // the only stars that move: eight twinklers
+    const s = stars[i];
     const x = ((s.x - t * 12 * s.z) % W + W) % W;
-    const a = (0.4 + 0.6 * Math.abs(Math.sin(t * 1.3 + s.tw))) * s.z;
-    ctx.fillStyle = 'rgba(200,220,255,' + a.toFixed(3) + ')';
+    ctx.fillStyle = 'rgba(200,220,255,' + ((0.4 + 0.6 * Math.abs(Math.sin(t * 1.3 + s.tw))) * s.z).toFixed(1) + ')';
     ctx.fillRect(x, s.y, s.z * 2.2, s.z * 2.2);
   }
-
-  if (!S) { ctx.restore(); return; }
-  const L = S.L;
-
-  for (const p of L.planets) {
-    for (let i = 0; i < 1; i++) {
-      const ph = (t * 0.35 + i * 0.5 + p.x * 0.001) % 1;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r + ph * 150, 0, TAU);
-      ctx.strokeStyle = 'hsla(' + p.hue + ',80%,70%,' + (0.16 * (1 - ph)).toFixed(3) + ')';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-    }
-  }
-
-  ctx.strokeStyle = 'rgba(255,90,90,0.55)';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(1.5, 1.5, W - 3, H - 3);
-
-  for (const s of L.planetSprites) ctx.drawImage(s.canvas, s.x, s.y);
-  if (L.rockSprite) ctx.drawImage(L.rockSprite.canvas, L.rockSprite.x, L.rockSprite.y);
   drawPortal(t);
+  ctx.fillStyle = '#ffe9a0';
   for (const d of S.dust) if (!d.got) drawDust(d, t);
 
   if (S.state === 'idle') drawAim();
 
-  const tr = S.trail;
-  if (tr.length > 4) {
+  const tr = S.trail, nt = tr.length;
+  if (nt > 4) {                                        // three strokes, older to newer, instead of one per segment
     ctx.lineWidth = 2;
-    for (let i = 2; i < tr.length; i += 6) {
-      const a = i / tr.length;
-      ctx.strokeStyle = 'rgba(120,200,255,' + (a * 0.7).toFixed(3) + ')';
+    for (let b = 0; b < 3; b++) {
+      const i0 = Math.floor(nt / 6) * 2 * b, i1 = b === 2 ? nt : Math.floor(nt / 6) * 2 * (b + 1) + 2;
+      if (i1 - i0 < 4) continue;
+      ctx.strokeStyle = TRAIL_STYLE[b];
       ctx.beginPath();
-      ctx.moveTo(tr[i - 2], tr[i - 1]);
-      ctx.lineTo(tr[i], tr[i + 1]);
+      ctx.moveTo(tr[i0], tr[i0 + 1]);
+      for (let i = i0 + 2; i < i1 && i < nt; i += 2) ctx.lineTo(tr[i], tr[i + 1]);
       ctx.stroke();
     }
   }
@@ -600,16 +685,14 @@ function draw(t) {
 
   for (const p of S.particles) {
     const a = Math.max(0, Math.min(1, p.life / p.max));
-    ctx.fillStyle = 'hsla(' + p.hue + ',100%,65%,' + a.toFixed(3) + ')';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 1.2 + a * 2.2, 0, TAU);
-    ctx.fill();
+    ctx.fillStyle = PCOLORS[p.hue < 30 ? 0 : p.hue < 90 ? 1 : p.hue < 150 ? 2 : 3][Math.min(3, Math.floor(a * 4))];
+    const sz = 2 + a * 2;
+    ctx.fillRect(p.x - sz / 2, p.y - sz / 2, sz, sz);
   }
   ctx.restore();
 
   drawHud();
   if (S.state === 'idle' || S.state === 'flying') drawDial();
-  drawHelp();
   drawMessage();
 }
 

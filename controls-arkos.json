@@ -1,0 +1,89 @@
+{
+ "version": 1,
+ "bindings": {
+  "up": [
+   [
+    "button",
+    8
+   ]
+  ],
+  "down": [
+   [
+    "button",
+    9
+   ]
+  ],
+  "left": [
+   [
+    "button",
+    10
+   ]
+  ],
+  "right": [
+   [
+    "button",
+    11
+   ]
+  ],
+  "a": [
+   [
+    "button",
+    1
+   ]
+  ],
+  "b": [
+   [
+    "button",
+    0
+   ]
+  ],
+  "x": [
+   [
+    "button",
+    2
+   ]
+  ],
+  "y": [
+   [
+    "button",
+    3
+   ]
+  ],
+  "l1": [
+   [
+    "button",
+    4
+   ]
+  ],
+  "r1": [
+   [
+    "button",
+    5
+   ]
+  ],
+  "start": [
+   [
+    "button",
+    13
+   ]
+  ],
+  "select": [
+   [
+    "button",
+    12
+   ]
+  ],
+  "l2": [
+   [
+    "button",
+    6
+   ]
+  ],
+  "r2": [
+   [
+    "button",
+    7
+   ]
+  ]
+ }
+}

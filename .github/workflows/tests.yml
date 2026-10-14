@@ -57,7 +57,7 @@ jobs:
       - name: Install ARM64 emulation
         run: sudo apt-get update && sudo apt-get install -y qemu-user libc6-arm64-cross gcc-aarch64-linux-gnu
       - name: Build ArkOS bundle
-        run: python tools/build_bundle.py arkos-aarch64
+        run: python tools/build_bundle.py arkos-aarch64 --controls controls-arkos.json
       - name: Run the test suite with the bundled ARM64 Python and pygame
         env:
           QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
@@ -84,6 +84,14 @@ jobs:
             --title "Latest build" --notes "Rolling build, replaced on every publish." \
             --target "$GITHUB_SHA" --latest
           gh release upload latest dist/SGBA-arkos-aarch64.zip --clobber
+      # Games are their own packages: a launcher plus one compiled .sgba, run on the emulator above.
+      - name: Publish the Slingshot Orbits port to the rolling "latest" release
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python tools/build_game_port.py web_games/slingshot_orbits --name "Slingshot Orbits" --out dist
+          gh release upload latest dist/slingshot-orbits-port.zip --clobber
 
   bundle-windows-x64:
     runs-on: windows-latest
