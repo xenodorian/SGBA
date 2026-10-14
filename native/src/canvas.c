@@ -1038,7 +1038,31 @@ static void flush_stale(Natives *n, Canvas *c) {
     c->version++;
 }
 
+#define RELEASE_DELAY 16
+static void release_due(Natives *n) {
+    int keep = 0;
+    for (int i = 0; i < n->nrel; i++) {
+        if (n->rel_at[i] + RELEASE_DELAY <= n->frame_no) { int id = n->rel_id[i]; if (id >= 0 && id < n->canvas_cap) { cv_free(n->canvases[id]); n->canvases[id] = NULL; } }
+        else { n->rel_id[keep] = n->rel_id[i]; n->rel_at[keep] = n->rel_at[i]; keep++; }
+    }
+    n->nrel = keep;
+}
+
+/* called from the page when a canvas object is garbage collected */
+NATIVE(n_release_canvas) {
+    Natives *n = NAT();
+    int id = js_arg_i(ctx, argv, 0);
+    static int disabled = -1;
+    if (disabled < 0) { const char *e = getenv("SGBA_NO_CANVAS_RELEASE"); disabled = e && *e == '1'; }       /* for comparing output */
+    if (disabled || id < 0 || id >= n->canvas_cap || !n->canvases[id] || id == n->main_id || id == n->ov_cid) return JS_UNDEFINED;
+    if (n->nrel == n->caprel) { n->caprel = n->caprel ? n->caprel * 2 : 64; n->rel_id = realloc(n->rel_id, (size_t)n->caprel * sizeof(int)); n->rel_at = realloc(n->rel_at, (size_t)n->caprel * sizeof(long)); }
+    n->rel_id[n->nrel] = id; n->rel_at[n->nrel] = n->frame_no; n->nrel++;
+    return JS_UNDEFINED;
+}
+
 void canvas_begin_frame(Natives *n) {
+    n->frame_no++;
+    release_due(n);
     Canvas *c = cv_get(n, n->main_id);
     if (!c || !c->retained || c->persistent || !c->pending.n) return;
     if (c->nstale == c->stalecap) { c->stalecap = c->stalecap ? c->stalecap * 2 : 8; c->stale = realloc(c->stale, c->stalecap * sizeof(OpList)); }
@@ -1402,7 +1426,7 @@ void canvas_register(Host *h, Natives *n, JSContext *ctx) {
     (void)h; (void)n;
     JSValue g = JS_GetGlobalObject(ctx);
 #define REG(js, fn, argc) JS_SetPropertyStr(ctx, g, js, JS_NewCFunction(ctx, fn, js, argc))
-    REG("__py_new_canvas", n_new_canvas, 3); REG("__py_resize", n_resize, 3); REG("__py_set", n_set, 3); REG("__py_call", n_call, 2);
+    REG("__py_release_canvas", n_release_canvas, 1); REG("__py_new_canvas", n_new_canvas, 3); REG("__py_resize", n_resize, 3); REG("__py_set", n_set, 3); REG("__py_call", n_call, 2);
     REG("__py_reset_state", n_reset_state, 1); REG("__py_fillRect", n_fillRect, 5); REG("__py_strokeRect", n_strokeRect, 5);
     REG("__py_clearRect", n_clearRect, 5); REG("__py_rect", n_rect, 5); REG("__py_moveTo", n_moveTo, 3); REG("__py_lineTo", n_lineTo, 3);
     REG("__py_translate", n_translate, 3); REG("__py_scale", n_scale, 3); REG("__py_beginPath", n_beginPath, 1);
@@ -1425,6 +1449,7 @@ void canvas_page_loaded(Host *h, Natives *n) {
 }
 
 void canvas_shutdown(Natives *n) {
+    free(n->rel_id); free(n->rel_at); n->rel_id = NULL; n->rel_at = NULL; n->nrel = 0;
     for (int i = 0; i < n->canvas_cap; i++) cv_free(n->canvases[i]);
     free(n->canvases);
     n->canvases = NULL;

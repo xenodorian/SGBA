@@ -30,6 +30,8 @@ typedef struct Natives {
     /* images announced by the page, decoded one per tick */
     int *preload;
     int preload_count, preload_cap;
+    /* canvases the page no longer references, freed a few frames later (a frame still being drawn may use them) */
+    int *rel_id; long *rel_at; int nrel, caprel; long frame_no;
 } Natives;
 
 Natives *host_natives(Host *h);

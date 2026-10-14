@@ -11,6 +11,7 @@ static const char *strcasestr(const char *h, const char *n) {          /* not in
 #include <ctype.h>
 #include <string.h>
 #include "sgba.h"
+#include "image.h"
 #include "natives.h"
 
 extern const unsigned char overlay_js[];
@@ -28,6 +29,8 @@ struct Host {
     char *pads_json;
     Config cfg;
     Natives nat;
+    size_t gc_floor;               /* native canvas memory after the last collection */
+    int gc_runs;
 };
 
 JSContext *host_ctx(Host *h) { return h->ctx; }
@@ -118,7 +121,7 @@ Host *host_create(const char *root, const char *save_path) {
     config_load(root, &h->cfg);
     h->rt = JS_NewRuntime();
     JS_SetMemoryLimit(h->rt, 96u * 1024 * 1024);
-    JS_SetGCThreshold(h->rt, 24u * 1024 * 1024);        /* QuickJS frees most objects by reference count; the cycle collector rarely needs to interrupt a frame */
+    { const char *gcmb = getenv("SGBA_GC_MB"); JS_SetGCThreshold(h->rt, (size_t)(gcmb ? atoi(gcmb) : 24) * 1024 * 1024); }        /* QuickJS frees most objects by reference count; the cycle collector rarely needs to interrupt a frame */
     JS_SetMaxStackSize(h->rt, 2u * 1024 * 1024);
     h->ctx = JS_NewContext(h->rt);
     JS_SetContextOpaque(h->ctx, h);
@@ -272,6 +275,20 @@ void host_tick(Host *h, double dt) {
         pump(h);
     }
     natives_end_tick(h, &h->nat);
+    /* Canvases are small objects on the JS side but megabytes of pixels on ours, and QuickJS cannot see them: a game that makes
+     * canvases and drops them would fill memory before the collector ever ran. Collect when canvas memory has grown by a lot. */
+    size_t canvas_bytes = surf_live_bytes();
+    size_t img = image_bytes_total(&h->nat);
+    canvas_bytes = canvas_bytes > img ? canvas_bytes - img : 0;
+    if (canvas_bytes < h->gc_floor) h->gc_floor = canvas_bytes;
+    if (canvas_bytes > h->gc_floor + 24u * 1024 * 1024) {
+        JS_RunGC(h->rt);
+        size_t after = surf_live_bytes();
+        after = after > img ? after - img : 0;
+        if (h->gc_runs < 3) sg_log("info", "native memory gc: canvases %zu MB -> %zu MB", canvas_bytes >> 20, after >> 20);
+        h->gc_floor = after;
+        h->gc_runs++;
+    }
 }
 
 void host_key(Host *h, int is_down, const char *key, const char *code, int key_code) {

@@ -42,14 +42,23 @@ IRect irect_union(IRect a, IRect b) {
 int irect_collide(IRect a, IRect b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h && a.w > 0 && a.h > 0 && b.w > 0 && b.h > 0; }
 int irect_contains(IRect o, IRect i) { return i.x >= o.x && i.y >= o.y && i.x + i.w <= o.x + o.w && i.y + i.h <= o.y + o.h; }
 
+static size_t g_live;
+
 Surf *surf_create(int w, int h) {
     Surf *s = calloc(1, sizeof *s);
     s->w = w; s->h = h;
     s->px = calloc((size_t)w * (size_t)h, 4);
     s->owns = 1;
+    s->nbytes = (size_t)w * (size_t)h * 4;
+    __atomic_add_fetch(&g_live, s->nbytes, __ATOMIC_RELAXED);
     return s;
 }
-void surf_free(Surf *s) { if (!s) return; if (s->owns) free(s->px); free(s); }
+void surf_free(Surf *s) {
+    if (!s) return;
+    if (s->owns) { free(s->px); __atomic_sub_fetch(&g_live, s->nbytes, __ATOMIC_RELAXED); }
+    free(s);
+}
+size_t surf_live_bytes(void) { return __atomic_load_n(&g_live, __ATOMIC_RELAXED); }
 void surf_fill_all(Surf *s, uint32_t argb) { size_t n = (size_t)s->w * s->h; for (size_t i = 0; i < n; i++) s->px[i] = argb; }
 
 void r_fill_solid(Surf *d, IRect r, uint32_t c) {

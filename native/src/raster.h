@@ -10,6 +10,7 @@ typedef struct {
     int w, h;
     uint32_t *px;
     int owns;           /* px is freed with the surface */
+    size_t nbytes;      /* what surf_create allocated, for surf_live_bytes() */
 } Surf;
 
 enum { COMP_OVER = 0, COMP_MULTIPLY, COMP_LIGHTER, COMP_SRC_IN, COMP_SRC_ATOP };
@@ -31,6 +32,7 @@ int irect_contains(IRect outer, IRect inner);
 void *r_scratch(int slot, size_t bytes);     /* thread-local grow-only buffer; slots 0 to 3 */
 Surf *surf_create(int w, int h);
 void surf_free(Surf *s);
+size_t surf_live_bytes(void);                    /* pixel memory held by all surfaces: images, canvases, copies */
 void surf_fill_all(Surf *s, uint32_t argb);
 
 uint32_t r_comp_px(uint32_t src, uint32_t dst, int comp);   /* one pixel; src carries its own alpha */

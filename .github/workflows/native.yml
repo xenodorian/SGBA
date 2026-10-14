@@ -28,6 +28,8 @@ jobs:
         run: |
           gcc -g -fsanitize=address -I native/src -I native/vendor/stb native/tests/text_test.c native/src/text.c native/build/x86_64/font_data.o -lm -o /tmp/text_test
           /tmp/text_test
+      - name: Memory (dropped canvases are freed) and background work (output unchanged)
+        run: native/tests/memory_test.sh
       - name: Diagnostics (session lines, crash and unclean-exit reports)
         run: native/tests/reports_test.sh
       - name: Build the R36S binary (glibc 2.17)

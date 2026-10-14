@@ -447,10 +447,13 @@
   Context2D.prototype.createImageData = function (w, h) { return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }; };
   g.CanvasRenderingContext2D = Context2D;
 
+  // The native canvas behind each canvas object is freed some frames after the object is collected (native runtime only).
+  const canvasReg = (typeof FinalizationRegistry === 'function' && typeof __py_release_canvas === 'function') ? new FinalizationRegistry((id) => __py_release_canvas(id)) : null;
   class Canvas extends Element {
     constructor() {
       super('canvas'); this.__id = canvasSeq++; this._w = 300; this._h = 150; this.__ctx = null;
       __py_new_canvas(this.__id, this._w, this._h);
+      if (canvasReg) canvasReg.register(this, this.__id);
     }
     get width() { return this._w; } set width(v) { this._w = v | 0; __py_resize(this.__id, this._w, this._h); if (this.__ctx) this.__ctx.__reset(); }
     get height() { return this._h; } set height(v) { this._h = v | 0; __py_resize(this.__id, this._w, this._h); if (this.__ctx) this.__ctx.__reset(); }

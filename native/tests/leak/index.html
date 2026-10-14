@@ -1,0 +1,5 @@
+<!doctype html><canvas id=c width=640 height=480></canvas><script>
+const g=document.getElementById('c').getContext('2d'); let held=[];
+function f(){ const k=document.createElement('canvas'); k.width=400; k.height=300; const x=k.getContext('2d'); x.fillStyle='#f00'; x.fillRect(0,0,400,300); g.drawImage(k,0,0); requestAnimationFrame(f); }
+requestAnimationFrame(f);
+</script>

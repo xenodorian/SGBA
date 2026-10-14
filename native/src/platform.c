@@ -43,7 +43,7 @@ int sdl_load(const char *hint_dir) {
     LOAD(UpdateWindowSurfaceRects, "SDL_UpdateWindowSurfaceRects"); LOAD(GetWindowSize, "SDL_GetWindowSize"); LOAD(PollEvent, "SDL_PollEvent");
     LOAD(Delay, "SDL_Delay"); LOAD(GetPerformanceCounter, "SDL_GetPerformanceCounter"); LOAD(GetPerformanceFrequency, "SDL_GetPerformanceFrequency");
     LOAD(ShowCursor, "SDL_ShowCursor"); LOAD(NumJoysticks, "SDL_NumJoysticks"); LOAD(JoystickOpen, "SDL_JoystickOpen");
-    LOAD(JoystickClose, "SDL_JoystickClose"); LOAD(JoystickName, "SDL_JoystickName"); LOAD(JoystickInstanceID, "SDL_JoystickInstanceID");
+    LOAD(JoystickClose, "SDL_JoystickClose"); LOAD(JoystickName, "SDL_JoystickName"); LOAD(JoystickNumAxes, "SDL_JoystickNumAxes"); LOAD(JoystickInstanceID, "SDL_JoystickInstanceID");
     LOAD(GetCurrentVideoDriver, "SDL_GetCurrentVideoDriver"); LOAD(OpenAudioDevice, "SDL_OpenAudioDevice");
     LOAD(CloseAudioDevice, "SDL_CloseAudioDevice"); LOAD(PauseAudioDevice, "SDL_PauseAudioDevice"); LOAD(LockAudioDevice, "SDL_LockAudioDevice");
     LOAD(UnlockAudioDevice, "SDL_UnlockAudioDevice"); LOAD(CreateThread, "SDL_CreateThread"); LOAD(WaitThread, "SDL_WaitThread");

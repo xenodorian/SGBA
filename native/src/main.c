@@ -1,9 +1,11 @@
 /* sgba: run a web game folder (index.html and its scripts) on the native runtime. */
 #ifdef _WIN32
 #include <stdlib.h>
+#include <time.h>
 #define setenv(k, v, o) _putenv_s((k), (v))
 #endif
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
@@ -16,9 +18,10 @@
 #include "platform.h"
 #include "input.h"
 #include "report.h"
+#include "image.h"
 #include <stdlib.h>
 
-typedef struct { int frame; char action[16]; int down; } PadEvent;
+typedef struct { int frame; char action[16]; int down; double val; } PadEvent;
 typedef struct { int frame; char *code; } JsAt;
 
 static const char *PAD_ORDER[16] = { "a", "b", "x", "y", "l1", "r1", "l2", "r2", "select", "start", "l3", "r3", "up", "down", "left", "right" };
@@ -37,8 +40,9 @@ static int parse_script(const char *text, int frames, PadEvent **out) {
         for (char *t = strtok_r(item, ":", &s2); t && np < 4; t = strtok_r(NULL, ":", &s2)) parts[np++] = t;
         if (np < 2) continue;
         int frame = atoi(parts[0]);
-#define ADD(f, a, d) do { if (n >= cap - 2) { cap *= 2; ev = realloc(ev, cap * sizeof *ev); } ev[n].frame = (f); snprintf(ev[n].action, sizeof ev[n].action, "%s", (a)); ev[n].down = (d); n++; } while (0)
+#define ADD(f, a, d) do { if (n >= cap - 2) { cap *= 2; ev = realloc(ev, cap * sizeof *ev); } ev[n].frame = (f); snprintf(ev[n].action, sizeof ev[n].action, "%s", (a)); ev[n].down = (d); ev[n].val = 0; n++; } while (0)
         if (np == 2) { ADD(frame, parts[1], 1); ADD(frame + 3, parts[1], 0); }
+        else if (!strcmp(parts[1], "axis") && np >= 4) { ADD(frame, "axis", 0); ev[n - 1].down = atoi(parts[2]); ev[n - 1].val = atof(parts[3]); }
         else if (!strcmp(parts[1], "hold") && np >= 4) { ADD(frame, parts[2], 1); ADD(frame + atoi(parts[3]), parts[2], 0); }
         else if (!strcmp(parts[1], "tap") && np >= 4) { int step = atoi(parts[3]); if (step < 1) step = 1; for (int f = frame; f < frames; f += step) { ADD(f, parts[2], 1); ADD(f + 3, parts[2], 0); } }
     }
@@ -47,13 +51,15 @@ static int parse_script(const char *text, int frames, PadEvent **out) {
     return n;
 }
 
-static void pad_json(unsigned mask, char *buf, size_t size) {
+static int cmp_float(const void *a, const void *b) { float x = *(const float *)a, y = *(const float *)b; return x < y ? -1 : x > y; }
+
+static void pad_json(unsigned mask, const double *axes, char *buf, size_t size) {
     size_t o = (size_t)snprintf(buf, size, "[{\"id\":\"SGBA standard gamepad\",\"index\":0,\"connected\":true,\"mapping\":\"standard\",\"timestamp\":0,\"buttons\":[");
     for (int i = 0; i < 16; i++) {
         int v = (mask >> i) & 1;
         o += (size_t)snprintf(buf + o, size - o, "%s{\"pressed\":%s,\"touched\":%s,\"value\":%d}", i ? "," : "", v ? "true" : "false", v ? "true" : "false", v);
     }
-    snprintf(buf + o, size - o, "],\"axes\":[0,0,0,0]}]");
+    snprintf(buf + o, size - o, "],\"axes\":[%.3f,%.3f,%.3f,%.3f]}]", axes[0], axes[1], axes[2], axes[3]);
 }
 
 static void write_png(const char *path, const Surf *s) {
@@ -118,7 +124,8 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
     const Surf *surface = NULL;
     double last = now_ms(), acc = 0, t_update = 0, t_draw = 0, t_present = 0;
     long frames = 0, updates = 0, all_frames = 0;
-    double last_tick = now_ms();
+    double last_tick = now_ms(), upd_max = 0;
+    long upd_slow = 0;
     int keys_listened = 0, armed = 0;
     char pads[4096], neutral[4096];
     int result = END_QUIT;
@@ -127,7 +134,7 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
     double hold[2] = {0, 0}, held_for[2] = {0, 0};      /* up/down auto-repeat */
     int ov_prev_visible = 0;
     if (is_game) host_enable_overlay(h);
-    pad_json(0, neutral, sizeof neutral);
+    pad_json(0, (const double[4]){0,0,0,0}, neutral, sizeof neutral);
     if (*started_at == 0) *started_at = last;
     for (;;) {
         if (max_seconds > 0 && now_ms() - *started_at > max_seconds * 1000.0) { const char *sp = getenv("SGBA_SHOT"); if (sp && surface) write_png(sp, surface); return END_QUIT; }
@@ -164,7 +171,10 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
         while (acc >= step_ms && steps < 5) {
             double u0 = now_ms();
             host_tick(h, step_ms / 1000.0);
-            t_update += now_ms() - u0;
+            double ud = now_ms() - u0;
+            t_update += ud;
+            if (ud > upd_max) upd_max = ud;
+            if (ud > step_ms * 0.75) upd_slow++;
             acc -= step_ms; steps++; updates++;
             if (g_app->choice[0]) break;
         }
@@ -212,8 +222,11 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
             t_draw += d1 - d0; t_present += d2 - d1;
             frames++; all_frames++;
             if (is_game && frames % 600 == 0) {
-                sg_log("info", "perf: %ld frames, %.2f updates/frame, update %.1f ms each, draw %.1f ms, present %.1f ms, rss %d MB, js errors %d",
-                       frames, (double)updates / 600.0, updates ? t_update / (double)updates : 0.0, t_draw / 600.0, t_present / 600.0, rss_mb(), host_error_count(h));
+                int il; double ims, imx;
+                image_stats(nat, &il, &ims, &imx, 1);
+                sg_log("info", "perf: %ld frames, %.2f updates/frame, update %.1f ms each (max %.0f, %ld over 75%% of a frame), draw %.1f ms, present %.1f ms, images %d loaded in %.0f ms (max %.0f), rss %d MB, js errors %d",
+                       frames, (double)updates / 600.0, updates ? t_update / (double)updates : 0.0, upd_max, upd_slow, t_draw / 600.0, t_present / 600.0, il, ims, imx, rss_mb(), host_error_count(h));
+                upd_max = 0; upd_slow = 0;
                 updates = 0; t_update = t_draw = t_present = 0;
             }
         }
@@ -350,15 +363,34 @@ int main(int argc, char **argv) {
     PadEvent *events;
     int nev = parse_script(script, frames, &events);
     unsigned mask = 0;
+    double axes[4] = {0, 0, 0, 0};
     IRect dirty[MAX_DIRTY];
     const Surf *surface = NULL;
+    float *ftimes = getenv("SGBA_FRAMESTATS") ? calloc((size_t)frames, sizeof(float)) : NULL;
     for (int f = 0; f < frames; f++) {
         for (int k = 0; k < njs; k++) if (js[k].frame == f) host_eval(h, js[k].code, "--js");
         int changed = 0;
-        for (int k = 0; k < nev; k++) if (events[k].frame == f) { int bit = pad_index(events[k].action); if (bit >= 0) { if (events[k].down) mask |= 1u << bit; else mask &= ~(1u << bit); changed = 1; } }
-        if (changed || f == 0) { char buf[4096]; pad_json(mask, buf, sizeof buf); host_set_pads(h, buf); }
+        for (int k = 0; k < nev; k++) if (events[k].frame == f) { if (!strcmp(events[k].action, "axis")) { if (events[k].down >= 0 && events[k].down < 4) axes[events[k].down] = events[k].val; changed = 1; continue; } int bit = pad_index(events[k].action); if (bit >= 0) { if (events[k].down) mask |= 1u << bit; else mask &= ~(1u << bit); changed = 1; } }
+        if (changed || f == 0) { char buf[4096]; pad_json(mask, axes, buf, sizeof buf); host_set_pads(h, buf); }
+        struct timespec ts0, ts1;
+        timespec_get(&ts0, TIME_UTC);
         host_tick(h, 1.0 / hz);
         canvas_take_dirty(host_natives(h), dirty, MAX_DIRTY, &surface);
+        timespec_get(&ts1, TIME_UTC);
+        if (ftimes) ftimes[f] = (float)((ts1.tv_sec - ts0.tv_sec) * 1000.0 + (ts1.tv_nsec - ts0.tv_nsec) / 1e6);
+    }
+    if (ftimes) {                                                                     /* SGBA_FRAMESTATS=1: where the slow frames are */
+        float *sorted = malloc(sizeof(float) * (size_t)frames);
+        memcpy(sorted, ftimes, sizeof(float) * (size_t)frames);
+        qsort(sorted, (size_t)frames, sizeof(float), cmp_float);
+        printf("frame ms: p50 %.2f p90 %.2f p99 %.2f p99.9 %.2f max %.2f\n", sorted[frames / 2], sorted[frames * 9 / 10], sorted[frames * 99 / 100], sorted[(long)(frames * 0.999)], sorted[frames - 1]);
+        float cut = sorted[frames - 1 > 9 ? frames - 10 : 0];
+        printf("slowest frames:");
+        for (int f = 0, shown = 0; f < frames && shown < 10; f++) if (ftimes[f] >= cut) { printf(" #%d=%.1f", f, ftimes[f]); shown++; }
+        printf("\n");
+        { int ld; double ms, mx; image_stats(host_natives(h), &ld, &ms, &mx, 0); printf("image loads %d, %.1f ms total, slowest %.1f ms", ld, ms, mx); struct ImageStore *is = host_natives(h)->images; if (is) printf(", read-ahead hit %d wait %d miss %d", is->ra_hit, is->ra_wait, is->ra_miss); printf("\n"); }
+        free(sorted);
+        free(ftimes);
     }
     if (shot && surface) {
         const Surf *panel = NULL; int px, py, md, ch;

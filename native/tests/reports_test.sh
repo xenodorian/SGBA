@@ -27,4 +27,7 @@ timeout 30 "$T/sgba" "$T/bad" --seconds 2 >/dev/null 2>&1
 chk "a game that throws gets an errors report with the message" "grep -q 'boom from the game' $R/errors-*.txt"
 chk "sessions.log has a line per played session (3)" "[ \$(wc -l < $R/sessions.log) = 3 ]"
 chk "at most 20 report files are kept" "[ \$(ls $R/*.txt | wc -l) -le 20 ]"
+mkdir -p "$T/menu"; cp "$BIN" "$T/menu/sgba"
+timeout 30 "$T/menu/sgba" --seconds 2 >/dev/null 2>&1
+chk "started with no game it shows the menu: no game is unpacked or played" "[ ! -s $T/menu/reports/sessions.log ] && ! grep -q unpacked $T/menu/sgba.log"
 exit $fail

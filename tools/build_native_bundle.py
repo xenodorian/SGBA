@@ -50,7 +50,9 @@ start=$(date +%s)
 run ""
 rc=$?
 elapsed=$(( $(date +%s) - start ))
-if [ $rc -ne 0 ] && [ $elapsed -lt 20 ]; then
+# Retry with the bundled SDL only when the program could not start (1 = SDL or window failed, 126/127 = could not be executed).
+# A crash (134, 139) or any exit after the game ran must not start the game again.
+if { [ $rc -eq 1 ] || [ $rc -eq 126 ] || [ $rc -eq 127 ]; } && [ $elapsed -lt 20 ]; then
   echo "first attempt failed (rc=$rc), retrying with bundled SDL" >> "$LOG"
   run "$APP/libSDL2-sgba.so"
   rc=$?

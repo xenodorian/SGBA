@@ -17,6 +17,8 @@ const char *input_raw_next(Input *in);                       /* next deliberate 
 void input_raw_clear(Input *in);
 void input_clear_bindings(Input *in);
 int input_joystick_count(const Input *in);
+void input_set_axis(Input *in, int index, double value);         /* analog stick axis, -1..1 (also used by the headless script) */
+void input_stick_axes(const Input *in, double out[4]);              /* left x, left y, right x, right y: dead zone and rescaled */
 void input_pad_json(const Input *in, int pad_only, char *buf, size_t size);
 void input_key_names(int sdl_key, char *key, size_t ks, char *code, size_t cs, int *key_code);
 #endif

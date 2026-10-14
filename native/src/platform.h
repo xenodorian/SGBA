@@ -26,6 +26,7 @@ typedef struct {
     typeof(&SDL_JoystickOpen) JoystickOpen;
     typeof(&SDL_JoystickClose) JoystickClose;
     typeof(&SDL_JoystickName) JoystickName;
+    typeof(&SDL_JoystickNumAxes) JoystickNumAxes;
     typeof(&SDL_JoystickInstanceID) JoystickInstanceID;
     typeof(&SDL_GetCurrentVideoDriver) GetCurrentVideoDriver;
     typeof(&SDL_OpenAudioDevice) OpenAudioDevice;
