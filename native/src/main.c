@@ -17,7 +17,7 @@
 #include "input.h"
 #include <stdlib.h>
 
-typedef struct { int frame; char action[16]; int down; double val; } PadEvent;
+typedef struct { int frame; char action[16]; int down; } PadEvent;
 typedef struct { int frame; char *code; } JsAt;
 
 static const char *PAD_ORDER[16] = { "a", "b", "x", "y", "l1", "r1", "l2", "r2", "select", "start", "l3", "r3", "up", "down", "left", "right" };
@@ -36,9 +36,8 @@ static int parse_script(const char *text, int frames, PadEvent **out) {
         for (char *t = strtok_r(item, ":", &s2); t && np < 4; t = strtok_r(NULL, ":", &s2)) parts[np++] = t;
         if (np < 2) continue;
         int frame = atoi(parts[0]);
-#define ADD(f, a, d) do { if (n >= cap - 2) { cap *= 2; ev = realloc(ev, cap * sizeof *ev); } ev[n].frame = (f); snprintf(ev[n].action, sizeof ev[n].action, "%s", (a)); ev[n].down = (d); ev[n].val = 0; n++; } while (0)
+#define ADD(f, a, d) do { if (n >= cap - 2) { cap *= 2; ev = realloc(ev, cap * sizeof *ev); } ev[n].frame = (f); snprintf(ev[n].action, sizeof ev[n].action, "%s", (a)); ev[n].down = (d); n++; } while (0)
         if (np == 2) { ADD(frame, parts[1], 1); ADD(frame + 3, parts[1], 0); }
-        else if (!strcmp(parts[1], "axis") && np >= 4) { ADD(frame, "axis", 0); ev[n - 1].down = atoi(parts[2]); ev[n - 1].val = atof(parts[3]); }
         else if (!strcmp(parts[1], "hold") && np >= 4) { ADD(frame, parts[2], 1); ADD(frame + atoi(parts[3]), parts[2], 0); }
         else if (!strcmp(parts[1], "tap") && np >= 4) { int step = atoi(parts[3]); if (step < 1) step = 1; for (int f = frame; f < frames; f += step) { ADD(f, parts[2], 1); ADD(f + 3, parts[2], 0); } }
     }
@@ -47,13 +46,13 @@ static int parse_script(const char *text, int frames, PadEvent **out) {
     return n;
 }
 
-static void pad_json(unsigned mask, const double *axes, char *buf, size_t size) {
+static void pad_json(unsigned mask, char *buf, size_t size) {
     size_t o = (size_t)snprintf(buf, size, "[{\"id\":\"SGBA standard gamepad\",\"index\":0,\"connected\":true,\"mapping\":\"standard\",\"timestamp\":0,\"buttons\":[");
     for (int i = 0; i < 16; i++) {
         int v = (mask >> i) & 1;
         o += (size_t)snprintf(buf + o, size - o, "%s{\"pressed\":%s,\"touched\":%s,\"value\":%d}", i ? "," : "", v ? "true" : "false", v ? "true" : "false", v);
     }
-    snprintf(buf + o, size - o, "],\"axes\":[%.3f,%.3f,%.3f,%.3f]}]", axes[0], axes[1], axes[2], axes[3]);
+    snprintf(buf + o, size - o, "],\"axes\":[0,0,0,0]}]");
 }
 
 static void write_png(const char *path, const Surf *s) {
@@ -126,7 +125,7 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
     double hold[2] = {0, 0}, held_for[2] = {0, 0};      /* up/down auto-repeat */
     int ov_prev_visible = 0;
     if (is_game) host_enable_overlay(h);
-    pad_json(0, (const double[4]){0,0,0,0}, neutral, sizeof neutral);
+    pad_json(0, neutral, sizeof neutral);
     if (*started_at == 0) *started_at = last;
     for (;;) {
         if (max_seconds > 0 && now_ms() - *started_at > max_seconds * 1000.0) { const char *sp = getenv("SGBA_SHOT"); if (sp && surface) write_png(sp, surface); return END_QUIT; }
@@ -343,14 +342,13 @@ int main(int argc, char **argv) {
     PadEvent *events;
     int nev = parse_script(script, frames, &events);
     unsigned mask = 0;
-    double axes[4] = {0, 0, 0, 0};
     IRect dirty[MAX_DIRTY];
     const Surf *surface = NULL;
     for (int f = 0; f < frames; f++) {
         for (int k = 0; k < njs; k++) if (js[k].frame == f) host_eval(h, js[k].code, "--js");
         int changed = 0;
-        for (int k = 0; k < nev; k++) if (events[k].frame == f) { if (!strcmp(events[k].action, "axis")) { if (events[k].down >= 0 && events[k].down < 4) axes[events[k].down] = events[k].val; changed = 1; continue; } int bit = pad_index(events[k].action); if (bit >= 0) { if (events[k].down) mask |= 1u << bit; else mask &= ~(1u << bit); changed = 1; } }
-        if (changed || f == 0) { char buf[4096]; pad_json(mask, axes, buf, sizeof buf); host_set_pads(h, buf); }
+        for (int k = 0; k < nev; k++) if (events[k].frame == f) { int bit = pad_index(events[k].action); if (bit >= 0) { if (events[k].down) mask |= 1u << bit; else mask &= ~(1u << bit); changed = 1; } }
+        if (changed || f == 0) { char buf[4096]; pad_json(mask, buf, sizeof buf); host_set_pads(h, buf); }
         host_tick(h, 1.0 / hz);
         canvas_take_dirty(host_natives(h), dirty, MAX_DIRTY, &surface);
     }
