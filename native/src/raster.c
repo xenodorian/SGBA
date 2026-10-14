@@ -12,6 +12,17 @@
 #define SG_NEON 1
 #endif
 
+/* Grow-only scratch memory, one set per thread: blits, polygons and gradients run thousands of times a frame and must not call malloc. */
+static __thread struct { void *p; size_t cap; } g_scratch[4];
+void *r_scratch(int slot, size_t bytes) {
+    if (g_scratch[slot].cap < bytes) {
+        free(g_scratch[slot].p);
+        g_scratch[slot].cap = bytes + bytes / 2 + 64;
+        g_scratch[slot].p = malloc(g_scratch[slot].cap);
+    }
+    return g_scratch[slot].p;
+}
+
 IRect irect_clip(IRect a, IRect b) {
     int x0 = a.x > b.x ? a.x : b.x, y0 = a.y > b.y ? a.y : b.y;
     int x1 = a.x + a.w < b.x + b.w ? a.x + a.w : b.x + b.w, y1 = a.y + a.h < b.y + b.h ? a.y + a.h : b.y + b.h;
@@ -406,8 +417,8 @@ void r_blit(Surf *d, const Surf *src, int sx, int sy, int sw, int sh, int dx, in
         return;
     }
     /* scaled or flipped: gather each source row into destination order once, then blend it like any other row */
-    int *cols = malloc(sizeof(int) * (size_t)dest.w);
-    uint32_t *tmp = malloc(sizeof(uint32_t) * (size_t)dest.w);
+    int *cols = r_scratch(0, sizeof(int) * (size_t)dest.w);
+    uint32_t *tmp = r_scratch(1, sizeof(uint32_t) * (size_t)dest.w);
     for (int x = 0; x < dest.w; x++) {
         int rx = dest.x + x - dx;
         int scol = (int)(((int64_t)rx * sw) / dw);
@@ -428,8 +439,6 @@ void r_blit(Surf *d, const Surf *src, int sx, int sy, int sw, int sh, int dx, in
         }
         blit_row(d->px + (size_t)y * d->w + dest.x, tmp, dest.w, alpha, comp, kind);
     }
-    free(tmp);
-    free(cols);
 }
 
 void r_mask(Surf *d, const uint8_t *mask, int mw, int mh, int dx, int dy, uint32_t c, int comp, IRect clip) {
@@ -472,7 +481,7 @@ void r_poly(Surf *d, const float *pts, int n, uint32_t color, int comp, IRect cl
     int y0 = (int)floorf(miny), y1 = (int)ceilf(maxy);
     if (y0 < area.y) y0 = area.y;
     if (y1 > area.y + area.h - 1) y1 = area.y + area.h - 1;
-    float *xs = malloc(sizeof(float) * (size_t)(n + 2));
+    float *xs = r_scratch(2, sizeof(float) * (size_t)(n + 2));
     for (int y = y0; y <= y1; y++) {
         float sy = y + 0.5f;
         int cnt = 0;
@@ -493,7 +502,6 @@ void r_poly(Surf *d, const float *pts, int n, uint32_t color, int comp, IRect cl
             else r_fill_blend(d, irect(xa, y, xb - xa + 1, 1), color, comp);
         }
     }
-    free(xs);
 }
 
 static void line_seg(Surf *d, int x0, int y0, int x1, int y1, int width, uint32_t color, int comp, IRect clip) {

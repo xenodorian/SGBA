@@ -363,7 +363,7 @@ static void run_op(Natives *n, Canvas *c, const Op *o, const IRect *region) {
         const Gradient *g = o->grad;
         int vertical = g->linear && fabs(g->a[3] - g->a[1]) >= fabs(g->a[2] - g->a[0]);     /* colour depends only on the row */
         int horizontal = g->linear && !vertical;                                             /* colour depends only on the column */
-        uint32_t *buf = vertical ? NULL : malloc(sizeof(uint32_t) * (size_t)r.w);
+        uint32_t *buf = vertical ? NULL : r_scratch(3, sizeof(uint32_t) * (size_t)r.w);
         if (horizontal)
             for (int x = 0; x < r.w; x++) { uint32_t gc = grad_at(g, rect.x, rect.y, rect.w, rect.h, r.x + x, r.y); buf[x] = (gc & 0x00FFFFFFu) | ((uint32_t)(PA(gc) * lvl / 255) << 24); }
         for (int y = r.y; y < r.y + r.h; y++) {
@@ -379,7 +379,6 @@ static void run_op(Natives *n, Canvas *c, const Op *o, const IRect *region) {
             if (o->comp == COMP_SRC_IN) { for (int x = 0; x < r.w; x++) if (PA(buf[x])) row[x] = r_comp_px(buf[x], row[x], o->comp); }
             else r_span_comp(row, buf, r.w, o->comp);
         }
-        free(buf);
         break;
     }
     case OP_IMAGE: {
@@ -442,20 +441,28 @@ static void run_geom(Natives *n, Canvas *c, const Op *o, IRect clip) {
     int ow = (int)ceil(fabs(tw * cs) + fabs(th * sn)), oh = (int)ceil(fabs(tw * sn) + fabs(th * cs));
     int left = cx - ow / 2, top = cy - oh / 2;
     IRect dest = irect_clip(irect(left, top, ow, oh), clip);
+    if (irect_empty(dest)) return;
+    int *colmap = r_scratch(0, sizeof(int) * (size_t)(tw + th));          /* source column / row for every rotated-space column / row */
+    int *rowmap = colmap + tw;
+    for (int i = 0; i < tw; i++) colmap[i] = (int)(((int64_t)i * sw) / tw);
+    for (int i = 0; i < th; i++) rowmap[i] = (int)(((int64_t)(mirrored ? th - 1 - i : i) * sh) / th);
+    int plain = (o->comp == COMP_OVER);
     for (int y = dest.y; y < dest.y + dest.h; y++) {
-        for (int x = dest.x; x < dest.x + dest.w; x++) {
-            double px = (x - left) + 0.5 - ow / 2.0, py = (y - top) + 0.5 - oh / 2.0;
-            double u = px * cs + py * sn + tw / 2.0, v = -px * sn + py * cs + th / 2.0;
-            int iu = (int)floor(u), iv = (int)floor(v);
-            if (iu < 0 || iv < 0 || iu >= tw || iv >= th) continue;
-            int srow = (int)(((int64_t)(mirrored ? th - 1 - iv : iv) * sh) / th), scol = (int)(((int64_t)iu * sw) / tw);
-            uint32_t s = src->px[(size_t)(sy + srow) * src->w + sx + scol];
-            int a = PA(s);
+        double py = (y - top) + 0.5 - oh / 2.0, px = (dest.x - left) + 0.5 - ow / 2.0;
+        double u = px * cs + py * sn + tw / 2.0, v = -px * sn + py * cs + th / 2.0;       /* then stepped by (cs, -sn) per pixel */
+        uint32_t *dp = d->px + (size_t)y * d->w;
+        for (int x = dest.x; x < dest.x + dest.w; x++, u += cs, v -= sn) {
+            if (u < 0 || v < 0) continue;                                                  /* floor(u) < 0 */
+            int iu = (int)u, iv = (int)v;
+            if (iu >= tw || iv >= th) continue;
+            uint32_t sp = src->px[(size_t)(sy + rowmap[iv]) * src->w + sx + colmap[iu]];
+            int a = PA(sp);
             if (kind == KIND_KEY) a = a ? 255 : 0;
             if (kind == KIND_OPAQUE) a = 255;
-            a = a * alpha / 255;
+            if (alpha < 255) a = a * alpha / 255;
             if (!a) continue;
-            d->px[(size_t)y * d->w + x] = r_comp_px((s & 0x00FFFFFFu) | ((uint32_t)a << 24), d->px[(size_t)y * d->w + x], o->comp);
+            if (plain && a == 255) dp[x] = sp | 0xFF000000u;
+            else dp[x] = r_comp_px((sp & 0x00FFFFFFu) | ((uint32_t)a << 24), dp[x], o->comp);
         }
     }
 }

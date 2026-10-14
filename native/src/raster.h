@@ -2,6 +2,7 @@
 #ifndef RASTER_H
 #define RASTER_H
 #include <stdint.h>
+#include <stddef.h>
 
 typedef struct { int x, y, w, h; } IRect;
 
@@ -27,6 +28,7 @@ IRect irect_union(IRect a, IRect b);
 int irect_collide(IRect a, IRect b);
 int irect_contains(IRect outer, IRect inner);
 
+void *r_scratch(int slot, size_t bytes);     /* thread-local grow-only buffer; slots 0 to 3 */
 Surf *surf_create(int w, int h);
 void surf_free(Surf *s);
 void surf_fill_all(Surf *s, uint32_t argb);
