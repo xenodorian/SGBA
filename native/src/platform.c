@@ -134,16 +134,28 @@ void display_present(Display *d, const Surf *logical, const IRect *rects, int n,
         if (nup < 16 && !scaled) { up[nup].x = r.x; up[nup].y = r.y; up[nup].w = r.w; up[nup].h = r.h; nup++; }
     }
     if (scaled) {
+        static int *xmap; static int xmap_w, xmap_ox, xmap_dw, xmap_lw;
+        if (!xmap || xmap_w != ww || xmap_ox != ox || xmap_dw != dw || xmap_lw != lw) {          /* column map once, not a division per pixel */
+            free(xmap);
+            xmap = malloc(sizeof(int) * (size_t)ww);
+            for (int x = 0; x < ww; x++) xmap[x] = (x < ox || x >= ox + dw) ? -1 : (int)((int64_t)(x - ox) * lw / dw);
+            xmap_w = ww; xmap_ox = ox; xmap_dw = dw; xmap_lw = lw;
+        }
         for (int y = 0; y < wh; y++) {
             uint8_t *row = (uint8_t *)ws->pixels + (size_t)y * ws->pitch;
             if (y < oy || y >= oy + dh) { memset(row, 0, (size_t)ww * d->bpp); continue; }
             int sy = (int)((int64_t)(y - oy) * lh / dh);
             const uint32_t *src = logical->px + (size_t)sy * lw;
-            for (int x = 0; x < ww; x++) {
-                if (x < ox || x >= ox + dw) { if (d->bpp == 4) ((uint32_t *)row)[x] = 0; else ((uint16_t *)row)[x] = 0; continue; }
-                uint32_t p = src[(int)((int64_t)(x - ox) * lw / dw)];
-                if (d->bpp == 4) ((uint32_t *)row)[x] = px_out(d, p);
-                else ((uint16_t *)row)[x] = (uint16_t)(((PR(p) >> 3) << 11) | ((PG(p) >> 2) << 5) | (PB(p) >> 3));
+            if (d->bpp == 4) {
+                uint32_t *out = (uint32_t *)row;
+                for (int x = 0; x < ww; x++) out[x] = xmap[x] < 0 ? 0 : px_out(d, src[xmap[x]]);
+            } else {
+                uint16_t *out = (uint16_t *)row;
+                for (int x = 0; x < ww; x++) {
+                    if (xmap[x] < 0) { out[x] = 0; continue; }
+                    uint32_t p = src[xmap[x]];
+                    out[x] = (uint16_t)(((PR(p) >> 3) << 11) | ((PG(p) >> 2) << 5) | (PB(p) >> 3));
+                }
             }
         }
         sdl.UpdateWindowSurface(d->win);
