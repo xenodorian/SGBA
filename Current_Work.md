@@ -240,3 +240,9 @@ Done in `native/`:
   - Newest 20 `.txt` reports are kept; uploaded ones move to `reports/sent/`.
 - All games run inside SGBA, so they are covered; the game name is in every report. The build id is the git short hash (`SGBA_BUILD`).
 - Test: `native/tests/reports_test.sh` (hooks: `SGBA_TEST_CRASH_AT_START=1`). Not measured on the device.
+
+## Crash found from the first uploaded reports (2026-10-14)
+- Reports on the owner's device (issues #1 to #3 in xenodorian/GitROMs) showed `signal 6 (abort)`, "double free or corruption", backtrace symbolized with an unstripped build of the same commit: `text_shutdown` (text.c) called from `natives_shutdown` / `host_destroy` in `run_interactive`.
+- Cause: the text cache is global but every host (game, pause menu, launcher) calls `text_shutdown()` when destroyed. It freed `m.a` without clearing it, so the second host destroy freed the same buffers again. It only happens after a pause menu or the launcher has been used, which is why direct launches exited with code 0. This is the "games go to a loading screen and drop back to the menu" crash. It was NOT the analog stick change.
+- Fix: clear each cache slot (and the byte count) after freeing. Test: `native/tests/text_test.c` (AddressSanitizer; fails with a double free on the old code, passes now).
+- Other finding in the reports, not fixed: one long Parry Perry session grew from 430 MB to 508 MB rss over about 12 minutes on a 897 MB device (possible leak), and update times spiked to 10 to 15 ms at times.

@@ -142,6 +142,9 @@ const Mask *text_mask(const char *utf8, int font_px, int bold, int italic) {
     return &g_cache[slot].m;
 }
 
+/* The cache is shared by every host (the game, the pause menu, the launcher), and each host calls this when it is destroyed:
+ * clear everything so the next call finds nothing left to free. */
 void text_shutdown(void) {
-    for (int i = 0; i < CACHE_SLOTS; i++) { free(g_cache[i].key); free(g_cache[i].m.a); g_cache[i].key = NULL; }
+    for (int i = 0; i < CACHE_SLOTS; i++) { free(g_cache[i].key); free(g_cache[i].m.a); memset(&g_cache[i], 0, sizeof g_cache[i]); }
+    g_bytes = 0;
 }

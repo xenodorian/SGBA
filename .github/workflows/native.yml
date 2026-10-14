@@ -24,6 +24,10 @@ jobs:
         run: |
           gcc -O2 -I native/src native/tests/raster_test.c native/src/raster.c -lm -o /tmp/raster_test
           /tmp/raster_test
+      - name: Text cache shutdown twice (AddressSanitizer)
+        run: |
+          gcc -g -fsanitize=address -I native/src -I native/vendor/stb native/tests/text_test.c native/src/text.c native/build/x86_64/font_data.o -lm -o /tmp/text_test
+          /tmp/text_test
       - name: Diagnostics (session lines, crash and unclean-exit reports)
         run: native/tests/reports_test.sh
       - name: Build the R36S binary (glibc 2.17)
