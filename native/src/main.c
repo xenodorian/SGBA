@@ -361,6 +361,7 @@ int main(int argc, char **argv) {
     long ops, replayed, skipped, fr;
     canvas_stats(host_natives(h), &ops, &replayed, &skipped, &fr);
     fprintf(stderr, "frames %d, js errors %d, ops/frame %ld, replayed/frame %ld, skipped %ld\n", frames, host_error_count(h), ops / (fr ? fr : 1), replayed / (fr ? fr : 1), skipped);
+    { extern long canvas_repaint_pixels(void); fprintf(stderr, "repainted pixels per frame: %ld\n", canvas_repaint_pixels() / (frames ? frames : 1)); }
     int errors = host_error_count(h);
     free(events);
     host_destroy(h);

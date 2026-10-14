@@ -252,6 +252,7 @@ struct Canvas {
     int id;
     Surf *surf;
     int retained, opaque, persistent, force_full, touched;
+    int opq_ver, opq_val;                  /* is the surface fully opaque? scanned once per version, so drawing it can copy rows */
     int version;
     State s;
     State *stack; int sp, scap;
@@ -264,7 +265,7 @@ struct Canvas {
     int grp_open; uint64_t grp_hash; char *grp_sig; int grp_start;
 };
 
-static long st_ops = 0, st_replayed = 0, st_skipped = 0, st_frames = 0;
+static long st_ops = 0, st_replayed = 0, st_skipped = 0, st_frames = 0, st_area = 0;
 
 static Canvas *cv_get(Natives *n, int id) { return (id >= 0 && id < n->canvas_cap) ? n->canvases[id] : NULL; }
 
@@ -311,6 +312,17 @@ static IRect cv_bounds(const Canvas *c) { return irect(0, 0, c->surf->w, c->surf
 static __thread int t_peek;
 static volatile int g_mt_miss;
 
+static int canvas_opaque(Canvas *sc) {
+    if (sc->opq_ver != sc->version + 1) {
+        uint32_t acc = 0xFF000000u;
+        size_t cnt = (size_t)sc->surf->w * (size_t)sc->surf->h;
+        for (size_t i = 0; i < cnt; i++) acc &= sc->surf->px[i];
+        sc->opq_val = (acc >> 24) == 255;
+        sc->opq_ver = sc->version + 1;
+    }
+    return sc->opq_val;
+}
+
 static const Surf *source_surf(Natives *n, int id, int *kind) {
     if (id >= IMAGE_ID_BASE) {
         if (t_peek) { const Surf *sp = image_surface_peek(n, id, kind); if (!sp) g_mt_miss = 1; return sp; }
@@ -318,7 +330,7 @@ static const Surf *source_surf(Natives *n, int id, int *kind) {
     }
     Canvas *s = cv_get(n, id);
     if (!s) return NULL;
-    *kind = KIND_ALPHA;
+    *kind = (t_peek ? s->opq_ver == s->version + 1 && s->opq_val : canvas_opaque(s)) ? KIND_OPAQUE : KIND_ALPHA;
     return s->surf;
 }
 
@@ -700,7 +712,7 @@ static void m_drawImage(Natives *n, Canvas *c, int src_id, const double *a, int 
     int kind = 0;
     if (src_id >= IMAGE_ID_BASE) kind = image_kind(n, src_id);
     if (src_id >= IMAGE_ID_BASE && kind < 0) { image_surface(n, src_id, &kind); }
-    if (src_id < IMAGE_ID_BASE) kind = KIND_ALPHA;
+    if (src_id < IMAGE_ID_BASE) { Canvas *oc = cv_get(n, src_id); kind = oc && oc != c && !(oc->retained && !oc->persistent) && canvas_opaque(oc) ? KIND_OPAQUE : KIND_ALPHA; }
     if (axis_aligned(c)) {
         double x0, y0, x1, y1;
         tf(c, dx, dy, &x0, &y0); tf(c, dx + dw, dy + dh, &x1, &y1);
@@ -858,45 +870,70 @@ static void out_push(IRect *out, int *count, int max, IRect r) {
     else { out[max - 1] = irect_union(out[max - 1], r); }
 }
 
-/* Repaint one region from op `start`. Big regions are cut into horizontal strips that the pool paints on every CPU core: the strips
- * do not overlap, and every op only reads shared data. Images and text the strips need are loaded first on this thread. */
-typedef struct { Natives *n; Canvas *c; OpList *ops; int start; IRect region; int nstrips; } Replay;
+/* Repainting: the changed area is a set of rectangles (see composite). Big ones are cut into horizontal strips, and all pieces are
+ * painted by the pool on every CPU core: the pieces never overlap, and every op only reads shared data. Images and text the pieces
+ * need are loaded first on this thread; a miss inside the pool is flagged and everything is painted again on one thread. */
+typedef struct { IRect r; int start; } Item;
+typedef struct { Natives *n; Canvas *c; OpList *ops; Item *items; } Replay;
 
-static void replay_strip(void *vp, int k) {
+static void replay_item(void *vp, int k) {
     Replay *rp = vp;
-    int y0 = rp->region.y + (int)((int64_t)rp->region.h * k / rp->nstrips), y1 = rp->region.y + (int)((int64_t)rp->region.h * (k + 1) / rp->nstrips);
-    IRect strip = irect(rp->region.x, y0, rp->region.w, y1 - y0);
+    const Item *it = &rp->items[k];
     t_peek = 1;
-    for (int i = rp->start; i < rp->ops->n; i++) {
+    for (int i = it->start; i < rp->ops->n; i++) {
         const Op *o = rp->ops->v[i];
-        if (irect_collide(o->box, strip)) run_op(rp->n, rp->c, o, &strip);
+        if (irect_collide(o->box, it->r)) run_op(rp->n, rp->c, o, &it->r);
     }
     t_peek = 0;
 }
 
-static void replay_region(Natives *n, Canvas *c, OpList *ops, int start, IRect region) {
-    int threads = pool_threads();
-    long area = (long)region.w * region.h;
-    if (threads < 2 || area < 30000 || region.h < 48) {
-        for (int i = start; i < ops->n; i++) if (irect_collide(ops->v[i]->box, region)) run_op(n, c, ops->v[i], &region);
+static void replay_items(Natives *n, Canvas *c, OpList *ops, Item *items, int count) {
+    long area = 0;
+    for (int k = 0; k < count; k++) area += (long)items[k].r.w * items[k].r.h;
+    if (pool_threads() < 2 || area < 30000 || count < 2) {
+        for (int k = 0; k < count; k++)
+            for (int i = items[k].start; i < ops->n; i++) if (irect_collide(ops->v[i]->box, items[k].r)) run_op(n, c, ops->v[i], &items[k].r);
         return;
     }
-    for (int i = start; i < ops->n; i++) {                   /* load what the strips will read */
-        const Op *o = ops->v[i];
-        if (!irect_collide(o->box, region)) continue;
-        int k;
-        if (o->kind == OP_IMAGE || o->kind == OP_SHEAR || o->kind == OP_ROT) source_surf(n, o->i[0], &k);
-        else if (o->kind == OP_TEXT) text_mask(o->text, o->i[0], o->i[1], o->i[2]);
-    }
-    int nstrips = region.h / 24;
-    if (nstrips > 4 * threads) nstrips = 4 * threads;
-    if (nstrips < 2) nstrips = 2;
-    Replay rp = { n, c, ops, start, region, nstrips };
+    for (int k = 0; k < count; k++)                          /* load what the pieces will read */
+        for (int i = items[k].start; i < ops->n; i++) {
+            const Op *o = ops->v[i];
+            if (!irect_collide(o->box, items[k].r)) continue;
+            int kind;
+            if (o->kind == OP_IMAGE || o->kind == OP_SHEAR || o->kind == OP_ROT) source_surf(n, o->i[0], &kind);
+            else if (o->kind == OP_TEXT) text_mask(o->text, o->i[0], o->i[1], o->i[2]);
+        }
+    Replay rp = { n, c, ops, items };
     g_mt_miss = 0;
-    pool_run(replay_strip, &rp, nstrips);
-    if (g_mt_miss) {                                         /* something was evicted while loading: paint the region again, alone */
+    pool_run(replay_item, &rp, count);
+    if (g_mt_miss) {                                         /* something was evicted while loading: paint everything again, alone */
         g_mt_miss = 0;
-        for (int i = start; i < ops->n; i++) if (irect_collide(ops->v[i]->box, region)) run_op(n, c, ops->v[i], &region);
+        for (int k = 0; k < count; k++)
+            for (int i = items[k].start; i < ops->n; i++) if (irect_collide(ops->v[i]->box, items[k].r)) run_op(n, c, ops->v[i], &items[k].r);
+    }
+}
+
+/* The changed area as tiles: scattered small changes and long thin ones (a line across the screen) repaint only the tiles they touch,
+ * not their bounding boxes. Horizontal runs of dirty tiles become rectangles; equal runs in consecutive rows are joined. */
+#define TILE 32
+static void tiles_to_rects(const uint8_t *tile, int tw, int th, IRect full, RectList *out) {
+    int first = out->n;
+    for (int ty = 0; ty < th; ty++) {
+        int tx = 0;
+        while (tx < tw) {
+            while (tx < tw && !tile[ty * tw + tx]) tx++;
+            if (tx >= tw) break;
+            int x0 = tx;
+            while (tx < tw && tile[ty * tw + tx]) tx++;
+            IRect r = irect(x0 * TILE, ty * TILE, (tx - x0) * TILE, TILE);
+            r = irect_clip(r, full);
+            int joined = 0;
+            for (int k = out->n - 1; k >= first && k >= out->n - 64; k--) {          /* the run above, if identical in x */
+                IRect *o = &out->v[k];
+                if (o->x == r.x && o->w == r.w && o->y + o->h == r.y) { o->h += r.h; joined = 1; break; }
+            }
+            if (!joined) rl_push(out, r);
+        }
     }
 }
 
@@ -934,12 +971,24 @@ static void composite(Natives *n, Canvas *c, OpList *ops, IRect *out, int *count
         ol_clear(ops);
         return;
     }
-    RectList regions = { 0 };
-    merge_rects(&changed, &regions, 6);
+    int tw = (full.w + TILE - 1) / TILE, th = (full.h + TILE - 1) / TILE;
+    uint8_t *tile = calloc((size_t)tw * (size_t)th, 1);
+    long ndirty = 0;
+    for (int k = 0; k < changed.n; k++) {
+        IRect q = irect_clip(irect(changed.v[k].x - 1, changed.v[k].y - 1, changed.v[k].w + 2, changed.v[k].h + 2), full);
+        if (irect_empty(q)) continue;
+        for (int ty = q.y / TILE; ty <= (q.y + q.h - 1) / TILE; ty++)
+            for (int tx = q.x / TILE; tx <= (q.x + q.w - 1) / TILE; tx++)
+                if (!tile[ty * tw + tx]) { tile[ty * tw + tx] = 1; ndirty++; }
+    }
     free(changed.v);
-    double area = 0;
-    for (int i = 0; i < regions.n; i++) area += (double)regions.v[i].w * regions.v[i].h;
-    if (getenv("SGBA_FULL") || area > FULL_REDRAW_FRACTION * full.w * full.h) { regions.n = 1; regions.v[0] = full; area = (double)full.w * full.h; }
+    RectList regions = { 0 };
+    if (getenv("SGBA_FULL") || (double)ndirty * TILE * TILE > FULL_REDRAW_FRACTION * full.w * full.h) rl_push(&regions, full);
+    else tiles_to_rects(tile, tw, th, full, &regions);
+    free(tile);
+    int nthreads = pool_threads();
+    Item *items = malloc(sizeof(Item) * (size_t)(regions.n * (4 * nthreads + 1) + 1));
+    int nitems = 0;
     for (int r = 0; r < regions.n; r++) {
         IRect region = regions.v[r];
         int start = 0;
@@ -948,9 +997,26 @@ static void composite(Natives *n, Canvas *c, OpList *ops, IRect *out, int *count
             if (o->covers && irect_contains(o->box, region)) { start = i; break; }
         }
         for (int i = start; i < ops->n; i++) if (irect_collide(ops->v[i]->box, region)) st_replayed++;
-        replay_region(n, c, ops, start, region);
-        out_push(out, count, max, region);
+        int strips = 1;
+        if (nthreads > 1 && (long)region.w * region.h >= 30000 && region.h >= 48) {
+            strips = region.h / 24;
+            if (strips > 4 * nthreads) strips = 4 * nthreads;
+            if (strips < 2) strips = 2;
+        }
+        for (int k = 0; k < strips; k++) {
+            int y0 = region.y + (int)((int64_t)region.h * k / strips), y1 = region.y + (int)((int64_t)region.h * (k + 1) / strips);
+            items[nitems].r = irect(region.x, y0, region.w, y1 - y0);
+            items[nitems].start = start;
+            nitems++;
+        }
     }
+    for (int k = 0; k < nitems; k++) st_area += (long)items[k].r.w * items[k].r.h;
+    replay_items(n, c, ops, items, nitems);
+    free(items);
+    RectList shown = { 0 };                                   /* what is handed to the display: a few joined rectangles */
+    merge_rects(&regions, &shown, 6);
+    for (int r = 0; r < shown.n; r++) out_push(out, count, max, shown.v[r]);
+    free(shown.v);
     free(regions.v);
     c->version++;
     OpList old = c->prev; c->prev = *ops; ol_free(&old); memset(ops, 0, sizeof *ops);
@@ -1062,6 +1128,7 @@ int canvas_main_size(Natives *n, int *w, int *h) {
 }
 
 void canvas_stats(Natives *n, long *ops, long *replayed, long *skipped, long *frames) { (void)n; *ops = st_ops; *replayed = st_replayed; *skipped = st_skipped; *frames = st_frames; }
+long canvas_repaint_pixels(void) { return st_area; }
 
 /* ---------------------------------------------------------------- display lists ("groups") */
 
