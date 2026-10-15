@@ -12,8 +12,13 @@
   <p id="menu-note">Orbit 1 has one planet. Each orbit adds one more. Beat orbit 20 to win.</p>
   <button id="btn-go">Pathfinder</button>
   <button id="btn-blind">Blind Crash</button>
+  <button id="btn-easy">Easy</button>
+  <button id="btn-medium">Medium</button>
+  <button id="btn-hard">Hard</button>
+  <button id="btn-diffback">Back</button>
   <button id="btn-title">Change mode</button>
   <button id="btn-back">Back to orbit</button>
+  <button id="btn-quit">Quit to title</button>
 </div>
 <script src="physics.js"></script>
 <script src="levels.js"></script>
@@ -39,6 +44,11 @@ const btnGo = document.getElementById('btn-go');
 const btnBack = document.getElementById('btn-back');
 const btnBlind = document.getElementById('btn-blind');
 const btnTitle = document.getElementById('btn-title');
+const btnEasy = document.getElementById('btn-easy');
+const btnMedium = document.getElementById('btn-medium');
+const btnHard = document.getElementById('btn-hard');
+const btnDiffBack = document.getElementById('btn-diffback');
+const btnQuit = document.getElementById('btn-quit');
 
 const AIM_DEAD = 0.5, DIAL_DEAD = 0.5;      // stick magnitudes below this leave the last aim or dial value in place
 const PREVIEW_STEPS = 140;                  // physics steps of the preview computed per frame (a full path is MAX_STEPS)
@@ -47,15 +57,21 @@ const MAX_PARTICLES = 64;
 const GRID = 8, GW = Math.ceil(WORLD_W / GRID), GH = Math.ceil(WORLD_H / GRID);   // collision lookup grid
 const LAUNCH_BUTTON = 5, RETRY_BUTTON = 9, MENU_BUTTON = 8, A_BUTTON = 0, B_BUTTON = 1;
 const MAX_HP = 20;                          // Blind Crash: hull points for the whole run
+// Blind Crash difficulty. Hard is the original rules. Medium: each stardust mends 2 HP. Easy: twice the stardust (20 a level).
+const DIFFS = { easy: { name: 'Easy', heal: 1, dust: 20 }, medium: { name: 'Medium', heal: 2, dust: 10 }, hard: { name: 'Hard', heal: 1, dust: 10 } };
 const DPAD_UP = 12, DPAD_DOWN = 13, DPAD_LEFT = 14, DPAD_RIGHT = 15;
 const AIM_RATE = 1.3, POWER_RATE = 0.45, FINE = 0.2;   // radians per second, power per second, fine-control factor
 
-let total = 0, best = 0, bestPath = 0, bestBlind = 0;
+let total = 0, best = 0, bestPath = 0;
+const bestBlind = { easy: 0, medium: 0, hard: 0 };
+let difficulty = 'hard';                    // Blind Crash only
 let mode = 'path';                          // 'path' is Pathfinder, 'blind' is Blind Crash
 let hp = MAX_HP;                            // Blind Crash: hull points
 let over = false;                           // Blind Crash: hull points ran out
 let finished = false;                       // orbit 20 was cleared: the win screen is up
-try { bestPath = Number(localStorage.getItem('slingshot-best')) || 0; bestBlind = Number(localStorage.getItem('slingshot-best-blind')) || 0; } catch (e) {}
+try { bestPath = Number(localStorage.getItem('slingshot-best')) || 0; bestBlind.hard = Number(localStorage.getItem('slingshot-best-blind')) || 0;
+  bestBlind.medium = Number(localStorage.getItem('slingshot-best-blind-medium')) || 0;
+  bestBlind.easy = Number(localStorage.getItem('slingshot-best-blind-easy')) || 0; } catch (e) {}
 
 let aimAng = 0;                             // launch direction in radians (0 = right, toward the portal)
 let power = 0.5;                            // power, 0 to 1 (the dial value)
@@ -259,7 +275,7 @@ function levelFor(n) {
   }
   return {
     orbit: n, L: cache,
-    dust: (mode === 'blind' ? cache.blindDustRaw : cache.dustRaw).map(a => ({ x: a[0], y: a[1], ph: a[2], got: false })),
+    dust: (mode === 'blind' ? cache.blindDustRaw.slice(0, DIFFS[difficulty].dust) : cache.dustRaw).map(a => ({ x: a[0], y: a[1], ph: a[2], got: false })),
   };
 }
 
@@ -317,7 +333,7 @@ function physicsStep() {
     if (!d.got && (d.x - sh.x) ** 2 + (d.y - sh.y) ** 2 < 22 * 22) {
       d.got = true; S.dustGot++;
       if (mode === 'blind') {                                   // each stardust mends one HP, or lights the route line once the hull is whole
-        if (hp < MAX_HP) { hp++; showMsg('Hull +1  HP ' + hp, 900); }
+        if (hp < MAX_HP) { const was = hp; hp = Math.min(MAX_HP, hp + DIFFS[difficulty].heal); showMsg('Hull +' + (hp - was) + '  HP ' + hp, 900); }
         else if (!S.guide) { S.guide = true; clearPreview(); showMsg('Route line on for this orbit', 1400); }
       }
       burst(d.x, d.y, 10, 48, 140);
@@ -361,8 +377,8 @@ function win() {
   total += bonus;
   if (total > best) {
     best = total;
-    if (mode === 'blind') bestBlind = best; else bestPath = best;
-    try { localStorage.setItem(mode === 'blind' ? 'slingshot-best-blind' : 'slingshot-best', String(best)); } catch (e) {}
+    if (mode === 'blind') bestBlind[difficulty] = best; else bestPath = best;
+    try { localStorage.setItem(mode === 'blind' ? 'slingshot-best-blind' + (difficulty === 'hard' ? '' : '-' + difficulty) : 'slingshot-best', String(best)); } catch (e) {}
   }
   burst(S.L.goal.x, S.L.goal.y, 120, 190, 260);
   showMsg((S.orbit >= FINAL_ORBIT ? 'Final orbit clear' : 'Orbit clear') + '  +' + bonus, 2400);
@@ -471,7 +487,7 @@ function clearPreview() { S.preview = null; pv = null; previewKey = ''; }
 
 function handleInput(dt) {
   if (menuOpen) return;
-  if (pad.menu && !prevPad.menu) { openMenu(); return; }
+  if (pad.menu && !prevPad.menu) { openMenu('pause'); return; }
   if (!S) return;
   if (pad.retry && !prevPad.retry && S.state !== 'won' && mode !== 'blind') { loadOrbit(S.orbit); return; }   // a retry would respawn the stardust
   applyAim(dt);
@@ -488,26 +504,40 @@ function handleInput(dt) {
 }
 
 // ---------- menu ----------
-// One panel serves four purposes: the title screen (pick a mode), the Select menu during play, the win screen and
-// the Blind Crash game over screen.
+// One panel serves several purposes: the title screen (pick a mode), the Blind Crash difficulty pick, the Select
+// (pause) menu during play, the win screen and the Blind Crash game over screen.
 const MODE_NAME = { path: 'Pathfinder', blind: 'Blind Crash' };
+function modeLabel() { return mode === 'blind' ? 'Blind Crash (' + DIFFS[difficulty].name + ')' : 'Pathfinder'; }
 function showPanel(kind) {
   const end = kind === 'win' || kind === 'over';
+  const diff = kind === 'difficulty', pause = kind === 'pause', title = kind === 'title';
+  const show = (el, on) => { el.style.display = on ? '' : 'none'; };
   btnGo.textContent = end ? (kind === 'win' ? 'Play again' : 'Try again') : MODE_NAME.path;
-  btnBlind.style.display = end ? 'none' : '';
-  btnTitle.style.display = end ? '' : 'none';
-  btnBack.style.display = !end && S && !over ? '' : 'none';
+  show(btnGo, title || end);
+  show(btnBlind, title);
+  show(btnEasy, diff); show(btnMedium, diff); show(btnHard, diff); show(btnDiffBack, diff);
+  show(btnTitle, end);
+  show(btnBack, pause);
+  show(btnQuit, pause);
   if (kind === 'win') {
-    menuTitle.textContent = 'You beat ' + MODE_NAME[mode];
+    menuTitle.textContent = 'You beat ' + modeLabel();
     menuIntro.textContent = 'All ' + FINAL_ORBIT + ' orbits cleared. Final score ' + total + '.';
     menuNote.textContent = best > 0 ? 'Best score ' + best + '.' : '';
   } else if (kind === 'over') {
     menuTitle.textContent = 'Game over';
     menuIntro.textContent = 'The hull gave out on orbit ' + S.orbit + ' of ' + FINAL_ORBIT + '. Score ' + total + '.';
     menuNote.textContent = best > 0 ? 'Best score ' + best + '.' : '';
+  } else if (diff) {
+    menuTitle.textContent = 'Blind Crash';
+    menuIntro.textContent = 'Choose a difficulty.';
+    menuNote.textContent = 'Easy: twice the stardust. Medium: each stardust mends 2 HP. Hard: the standard rules.';
+  } else if (pause) {
+    menuTitle.textContent = 'Paused';
+    menuIntro.textContent = modeLabel() + ', orbit ' + S.orbit + ' of ' + FINAL_ORBIT + '.';
+    menuNote.textContent = 'Quit to title ends this run.';
   } else {
     menuTitle.textContent = 'Slingshot Orbits';
-    menuIntro.textContent = S ? 'Choosing a mode starts a new game at orbit 1.' : 'Pick a mode.';
+    menuIntro.textContent = 'Pick a mode.';
     menuNote.textContent = 'Pathfinder: the route line shows your shot. Blind Crash: no line, 20 HP for all ' + FINAL_ORBIT + ' orbits.';
   }
 }
@@ -528,6 +558,11 @@ function finishGame() {
   openMenu('win');
 }
 
+function quitToTitle() {
+  S = null; cache = null; finished = false; over = false;
+  openMenu('title');
+}
+
 function gameOver() {
   over = true;
   openMenu('over');
@@ -544,10 +579,11 @@ function startMusic() {
   } catch (e) {}
 }
 
-function startGame(m) {
+function startGame(m, d) {
   startMusic();
   mode = m === 'blind' ? 'blind' : 'path';
-  best = mode === 'blind' ? bestBlind : bestPath;
+  if (d && DIFFS[d]) difficulty = d;
+  best = mode === 'blind' ? bestBlind[difficulty] : bestPath;
   finished = false; over = false;
   hp = MAX_HP;
   total = 0;
@@ -556,10 +592,15 @@ function startGame(m) {
   loadOrbit(1);
 }
 
-btnGo.addEventListener('click', () => startGame(finished || over ? mode : 'path'));   // Play again keeps the mode
-btnBlind.addEventListener('click', () => startGame('blind'));
+btnGo.addEventListener('click', () => startGame(finished || over ? mode : 'path'));   // Play again keeps the mode and difficulty
+btnBlind.addEventListener('click', () => showPanel('difficulty'));
+btnEasy.addEventListener('click', () => startGame('blind', 'easy'));
+btnMedium.addEventListener('click', () => startGame('blind', 'medium'));
+btnHard.addEventListener('click', () => startGame('blind', 'hard'));
+btnDiffBack.addEventListener('click', () => showPanel('title'));
 btnTitle.addEventListener('click', () => { finished = false; over = false; showPanel('title'); });
 btnBack.addEventListener('click', closeMenu);
+btnQuit.addEventListener('click', quitToTitle);
 showPanel('title');
 
 // ---------- effects ----------
@@ -801,7 +842,7 @@ function frame(now) {
 window.slingshotStatus = () => S ? {
   orbit: S.orbit, state: S.state, shots: S.shots, planets: S.L.planets.length, dust: S.dustGot,
   total, best, aim: aimAng, power, x: S.ship.x, y: S.ship.y, menu: menuOpen, finished,
-  mode, hp, stardust: S.dustGot, dustTotal: S.dust.length, guide: S.guide, over, preview: !!S.preview,
+  mode, difficulty, hp, stardust: S.dustGot, dustTotal: S.dust.length, guide: S.guide, over, preview: !!S.preview,
 } : null;
 // Test hook: jump straight to an orbit (the tests use it to reach the final orbit without playing the nineteen before it).
 // Test hook: set the Blind Crash hull points and carried stardust.

@@ -17,7 +17,7 @@ const folder = path.join(__dirname, "..", "web_games", "slingshot_orbits");
 const physics = new Function(fs.readFileSync(path.join(folder, "physics.js"), "utf8") +
   "\nreturn { buildLevel, sim, scatterDust, MAX_PLANETS };")();
 
-const BLIND_DUST = 10;            // stardust per level in Blind Crash (Pathfinder keeps the 2 to 4 in `dust`)
+const BLIND_DUST = 20;            // stardust per level stored for Blind Crash: Easy uses all 20, Medium and Hard the first 10 (Pathfinder keeps the 2 to 4 in `dust`)
 const r4 = (v) => Math.round(v * 1e4) / 1e4;
 // Blind Crash's bigger stardust set, scattered from the stored level numbers so it can be redone without the search.
 function blindDust(level, orbit) {

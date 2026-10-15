@@ -74,11 +74,15 @@ class SlingshotTests(unittest.TestCase):
         self.press("a", 3)               # Launch is the first row of the menu
         self.assertEqual(self.status()["orbit"], 1)
 
-    def start_blind(self):
+    def start_blind(self, difficulty="hard"):
         self.step(5)
         self.press("down", 2)            # second row of the title menu: Blind Crash
+        self.press("a", 3)               # opens the difficulty pick: Easy, Medium, Hard
+        for _ in range({"easy": 0, "medium": 1, "hard": 2}[difficulty]):
+            self.press("down", 2)
         self.press("a", 3)
         self.assertEqual(self.status()["mode"], "blind")
+        self.assertEqual(self.status()["difficulty"], difficulty)
 
     def aim_at(self, angle, power):
         phi = power * 2 * math.pi + math.pi / 2
@@ -199,6 +203,10 @@ class SlingshotTests(unittest.TestCase):
             for x, y in (lv["start"], lv["goal"]):
                 self.assertTrue(0 < x < 640 and 0 < y < 480)
 
+    def test_blind_crash_hard_has_ten_stardust(self):
+        self.start_blind()
+        self.assertEqual(self.status()["dustTotal"], 10)
+
     def test_blind_crash_starts_with_20_hp_and_no_route_line(self):
         self.start_blind()
         status = self.status()
@@ -272,12 +280,41 @@ class SlingshotTests(unittest.TestCase):
     def test_blind_crash_has_more_stardust_than_pathfinder(self):
         self.start_game()
         path_total = self.status()["dustTotal"]
+        self.assertEqual(path_total, len(self.levels["1:1"]["dust"]))
+        self.assertLess(path_total, 5)
+        self.assertEqual(len(self.levels["1:1"]["bdust"]), 20)
+
+    def test_pause_menu_resumes_or_quits_to_the_title(self):
+        self.start_game()
+        self.press("select", 2)
+        self.assertTrue(self.status()["menu"])
+        self.press("a", 3)                                                    # Back to orbit
+        status = self.status()
+        self.assertFalse(status["menu"])
+        self.assertEqual(status["orbit"], 1)
         self.press("select", 2)
         self.press("down", 2)
-        self.press("a", 3)                                                    # Blind Crash from the Select menu
-        self.assertEqual(self.status()["mode"], "blind")
+        self.press("a", 3)                                                    # Quit to title
+        self.assertEqual(self.game.host.ctx.eval("String(window.slingshotStatus())"), "null")
+        self.press("a", 3)                                                    # the title menu works again: Pathfinder
+        self.assertEqual((self.status()["mode"], self.status()["orbit"]), ("path", 1))
+
+    def test_easy_has_twice_the_stardust_and_medium_mends_two_hp(self):
+        self.start_blind("easy")
+        self.assertEqual((self.status()["dustTotal"], self.status()["difficulty"]), (20, "easy"))
+        self.game.host.ctx.eval("window.slingshotGrant(10)")
+        self.collect_one_dust()
+        self.assertEqual(self.status()["hp"], 11)                             # easy still mends 1 per stardust
+
+    def test_medium_stardust_mends_two_hp_and_stops_at_twenty(self):
+        self.start_blind("medium")
         self.assertEqual(self.status()["dustTotal"], 10)
-        self.assertLess(path_total, 5)
+        self.game.host.ctx.eval("window.slingshotGrant(10)")
+        self.collect_one_dust()
+        self.assertEqual(self.status()["hp"], 12)
+        self.game.host.ctx.eval("window.slingshotGrant(19)")
+        self.collect_one_dust()
+        self.assertEqual((self.status()["hp"], self.status()["guide"]), (20, False))   # capped, route line only once already full
 
     def test_each_stardust_mends_one_hp(self):
         self.start_blind()
