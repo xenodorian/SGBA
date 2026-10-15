@@ -23,7 +23,7 @@
 
 // Controls (handheld, no sticks needed): D-pad left/right rotates the aim, D-pad up/down sets the power,
 // hold B for fine control, A or R1 launches, Start retries, Select opens the menu.
-// Blind Crash: X spends 3 stardust to repair 1 HP, Y spends 10 stardust to turn the route line on for the orbit.
+// Blind Crash: each stardust mends 1 HP, and once the hull is full it lights the route line for the orbit.
 // Sticks still work where a pad has them: left stick aims, right stick is a 360 degree power dial
 // (up is 0 degrees = no power, left 25%, down 50%, right 75%).
 // Speed: everything that does not move is baked once per orbit into one layer (see bakeScene), collisions use a
@@ -45,14 +45,14 @@ const PREVIEW_STEPS = 140;                  // physics steps of the preview comp
 const PREVIEW_STRIDE = 8;                   // the preview line uses every 8th step
 const MAX_PARTICLES = 64;
 const GRID = 8, GW = Math.ceil(WORLD_W / GRID), GH = Math.ceil(WORLD_H / GRID);   // collision lookup grid
-const LAUNCH_BUTTON = 5, RETRY_BUTTON = 9, MENU_BUTTON = 8, A_BUTTON = 0, B_BUTTON = 1, X_BUTTON = 2, Y_BUTTON = 3;
-const MAX_HP = 20, REPAIR_COST = 3, GUIDE_COST = 10;   // Blind Crash: hull points for the whole run, and what stardust buys
+const LAUNCH_BUTTON = 5, RETRY_BUTTON = 9, MENU_BUTTON = 8, A_BUTTON = 0, B_BUTTON = 1;
+const MAX_HP = 20;                          // Blind Crash: hull points for the whole run
 const DPAD_UP = 12, DPAD_DOWN = 13, DPAD_LEFT = 14, DPAD_RIGHT = 15;
 const AIM_RATE = 1.3, POWER_RATE = 0.45, FINE = 0.2;   // radians per second, power per second, fine-control factor
 
 let total = 0, best = 0, bestPath = 0, bestBlind = 0;
 let mode = 'path';                          // 'path' is Pathfinder, 'blind' is Blind Crash
-let hp = MAX_HP, wallet = 0;                // Blind Crash: hull points and the stardust the player is carrying
+let hp = MAX_HP;                            // Blind Crash: hull points
 let over = false;                           // Blind Crash: hull points ran out
 let finished = false;                       // orbit 20 was cleared: the win screen is up
 try { bestPath = Number(localStorage.getItem('slingshot-best')) || 0; bestBlind = Number(localStorage.getItem('slingshot-best-blind')) || 0; } catch (e) {}
@@ -62,8 +62,8 @@ let power = 0.5;                            // power, 0 to 1 (the dial value)
 let S = null;                               // current orbit state
 let cache = null;                           // baked sprites for the orbit on screen
 let menuOpen = false;
-let prevPad = { launch: false, retry: false, menu: false, x: false, y: false };
-let pad = { launch: false, retry: false, menu: false, x: false, y: false, up: false, down: false, left: false, right: false, fine: false, sx: 0, sy: 0, tx: 0, ty: 0 };
+let prevPad = { launch: false, retry: false, menu: false };
+let pad = { launch: false, retry: false, menu: false, up: false, down: false, left: false, right: false, fine: false, sx: 0, sy: 0, tx: 0, ty: 0 };
 let msgText = '', msgLeft = 0;
 let previewKey = '', frameNo = 0, pv = null;
 let launchLock = true;                      // set when a menu closes: the press that chose Launch must not also fire a shot
@@ -249,6 +249,7 @@ function levelFor(n) {
       start: { x: raw.start[0], y: raw.start[1] },
       sol: { vx: raw.sol[0], vy: raw.sol[1], tol: raw.sol[2], strict: raw.sol[3] === 1, shortcuts: raw.sol[4] },
       dustRaw: raw.dust,
+      blindDustRaw: raw.bdust || raw.dust,        // Blind Crash scatters more stardust
       planetSprites: planets.map(bakePlanet),
       rockSprite: bakeRocks(rocks),
     };
@@ -258,7 +259,7 @@ function levelFor(n) {
   }
   return {
     orbit: n, L: cache,
-    dust: cache.dustRaw.map(a => ({ x: a[0], y: a[1], ph: a[2], got: false })),
+    dust: (mode === 'blind' ? cache.blindDustRaw : cache.dustRaw).map(a => ({ x: a[0], y: a[1], ph: a[2], got: false })),
   };
 }
 
@@ -315,7 +316,10 @@ function physicsStep() {
   for (const d of S.dust) {
     if (!d.got && (d.x - sh.x) ** 2 + (d.y - sh.y) ** 2 < 22 * 22) {
       d.got = true; S.dustGot++;
-      if (mode === 'blind') wallet++;
+      if (mode === 'blind') {                                   // each stardust mends one HP, or lights the route line once the hull is whole
+        if (hp < MAX_HP) { hp++; showMsg('Hull +1  HP ' + hp, 900); }
+        else if (!S.guide) { S.guide = true; clearPreview(); showMsg('Route line on for this orbit', 1400); }
+      }
       burst(d.x, d.y, 10, 48, 140);
     }
   }
@@ -398,7 +402,6 @@ function readPad() {
   pad.launch = pressed(LAUNCH_BUTTON) || pressed(A_BUTTON);
   pad.retry = pressed(RETRY_BUTTON);
   pad.menu = pressed(MENU_BUTTON);
-  pad.x = pressed(X_BUTTON); pad.y = pressed(Y_BUTTON);
   pad.up = pressed(DPAD_UP); pad.down = pressed(DPAD_DOWN);
   pad.left = pressed(DPAD_LEFT); pad.right = pressed(DPAD_RIGHT);
   pad.fine = pressed(B_BUTTON);
@@ -466,27 +469,11 @@ function updatePreview() {
 
 function clearPreview() { S.preview = null; pv = null; previewKey = ''; }
 
-// Blind Crash: stardust buys repairs and the route line. Only while the ship sits at the start.
-function spendStardust() {
-  if (S.state !== 'idle') return;
-  if (pad.x && !prevPad.x) {
-    if (hp >= MAX_HP) showMsg('Hull already intact', 1200);
-    else if (wallet < REPAIR_COST) showMsg('Repair needs ' + REPAIR_COST + ' stardust', 1400);
-    else { wallet -= REPAIR_COST; hp++; showMsg('Hull repaired  HP ' + hp, 1400); }
-  }
-  if (pad.y && !prevPad.y) {
-    if (S.guide) showMsg('Route line already on', 1200);
-    else if (wallet < GUIDE_COST) showMsg('Route line needs ' + GUIDE_COST + ' stardust', 1400);
-    else { wallet -= GUIDE_COST; S.guide = true; clearPreview(); showMsg('Route line on for this orbit', 1600); }
-  }
-}
-
 function handleInput(dt) {
   if (menuOpen) return;
   if (pad.menu && !prevPad.menu) { openMenu(); return; }
   if (!S) return;
   if (pad.retry && !prevPad.retry && S.state !== 'won' && mode !== 'blind') { loadOrbit(S.orbit); return; }   // a retry would respawn the stardust
-  if (mode === 'blind') spendStardust();
   applyAim(dt);
   if (!pad.launch) launchLock = false;
   if (S.state === 'idle') {
@@ -562,7 +549,7 @@ function startGame(m) {
   mode = m === 'blind' ? 'blind' : 'path';
   best = mode === 'blind' ? bestBlind : bestPath;
   finished = false; over = false;
-  hp = MAX_HP; wallet = 0;
+  hp = MAX_HP;
   total = 0;
   closeMenu();
   shake = 0;
@@ -706,7 +693,7 @@ function drawHelp() {
     g.font = '12px sans-serif';
     g.textAlign = 'center';
     g.fillText(mode === 'blind'
-      ? 'Up/Down power | Left/Right aim | B fine | A launch | X repair ' + REPAIR_COST + ' | Y route line ' + GUIDE_COST + ' | Select menu'
+      ? 'Up/Down power | Left/Right aim | B fine | A launch | Stardust: +1 HP, then route line | Select menu'
       : 'Up/Down power | Left/Right aim | B fine | A launch | Start retry | Select menu', W / 2, 12);
     helpCanvas[mode] = c;
   }
@@ -716,7 +703,7 @@ function drawHelp() {
 // The HUD line is text, so it is baked into its own strip and redrawn only when a number changes.
 function drawHud() {
   const items = mode === 'blind'
-    ? ['ORBIT ' + S.orbit + '/' + FINAL_ORBIT, 'HP ' + hp + '/' + MAX_HP, 'STARDUST ' + wallet, 'PLANETS ' + S.L.planets.length, 'SCORE ' + total, 'BEST ' + best]
+    ? ['ORBIT ' + S.orbit + '/' + FINAL_ORBIT, 'HP ' + hp + '/' + MAX_HP, 'STARDUST ' + S.dustGot + '/' + S.dust.length, 'PLANETS ' + S.L.planets.length, 'SCORE ' + total, 'BEST ' + best]
     : ['ORBIT ' + S.orbit + '/' + FINAL_ORBIT, 'SHOTS ' + S.shots, 'PLANETS ' + S.L.planets.length,
       'STARDUST ' + S.dustGot + '/' + S.dust.length, 'SCORE ' + total, 'BEST ' + best];
   const key = items.join('|');
@@ -805,7 +792,7 @@ function frame(now) {
   shake = Math.max(0, shake - dt * 2.2);
   if (!menuOpen && S) update(dt);
   handleInput(dt);
-  prevPad = { launch: pad.launch, retry: pad.retry, menu: pad.menu, x: pad.x, y: pad.y };
+  prevPad = { launch: pad.launch, retry: pad.retry, menu: pad.menu };
   draw(now / 1000);
   requestAnimationFrame(frame);
 }
@@ -814,11 +801,14 @@ function frame(now) {
 window.slingshotStatus = () => S ? {
   orbit: S.orbit, state: S.state, shots: S.shots, planets: S.L.planets.length, dust: S.dustGot,
   total, best, aim: aimAng, power, x: S.ship.x, y: S.ship.y, menu: menuOpen, finished,
-  mode, hp, stardust: wallet, guide: S.guide, over, preview: !!S.preview,
+  mode, hp, stardust: S.dustGot, dustTotal: S.dust.length, guide: S.guide, over, preview: !!S.preview,
 } : null;
 // Test hook: jump straight to an orbit (the tests use it to reach the final orbit without playing the nineteen before it).
 // Test hook: set the Blind Crash hull points and carried stardust.
-window.slingshotGrant = (h, d) => { hp = h; wallet = d; hudKey = ''; };
+window.slingshotGrant = (h) => { hp = h; hudKey = ''; };
+// Test hook: where the next uncollected stardust is, and a way to put the ship there.
+window.slingshotDust = () => { const d = S.dust.find(q => !q.got); return d ? { x: d.x, y: d.y } : null; };
+window.slingshotWarp = (x, y) => { S.ship.x = x; S.ship.y = y; };
 window.slingshotGoto = (n) => { finished = false; over = false; closeMenu(); loadOrbit(n); };
 
 makeStars();

@@ -246,11 +246,14 @@ class SlingshotTests(unittest.TestCase):
 
     def test_zero_hp_is_game_over_and_try_again_restarts(self):
         self.start_blind()
-        self.game.host.ctx.eval("window.slingshotGrant(1, 0)")
+        self.game.host.ctx.eval("window.slingshotGrant(1)")
         sx = self.levels["1:1"]["start"][0]
-        self.aim_at(math.pi if sx > 320 else 0.0, 0.9)
-        self.press("r1", 2)
-        self.step(60 * 14)
+        for _ in range(6):                                                    # a stardust on the way would mend the hull, so crash until it is gone
+            if self.status()["over"]:
+                break
+            self.aim_at(math.pi if sx > 320 else 0.0, 0.9)
+            self.press("r1", 2)
+            self.step(60 * 14)
         status = self.status()
         self.assertTrue(status["over"] and status["menu"])
         self.assertEqual(status["hp"], 0)
@@ -258,35 +261,42 @@ class SlingshotTests(unittest.TestCase):
         status = self.status()
         self.assertEqual((status["mode"], status["hp"], status["orbit"], status["over"], status["menu"]), ("blind", 20, 1, False, False))
 
-    def test_stardust_repairs_for_three_and_route_line_for_ten(self):
-        self.start_blind()
-        self.game.host.ctx.eval("window.slingshotGrant(10, 2)")
-        self.press("x", 2)
-        self.assertEqual((self.status()["hp"], self.status()["stardust"]), (10, 2))   # two is not enough
-        self.game.host.ctx.eval("window.slingshotGrant(10, 13)")
-        self.press("x", 2)
-        self.assertEqual((self.status()["hp"], self.status()["stardust"]), (11, 10))
-        self.aim_at(0.3, 0.5)
-        self.press("y", 2)
-        status = self.status()
-        self.assertEqual((status["guide"], status["stardust"]), (True, 0))
+    def collect_one_dust(self):
+        """Put the ship on the next stardust and fire a gentle shot so the pickup happens in flight."""
+        spot = json.loads(self.game.host.ctx.eval("JSON.stringify(window.slingshotDust())"))
+        self.game.host.ctx.eval(f"window.slingshotWarp({spot['x']}, {spot['y']})")
+        self.aim_at(0.0, 0.05)
+        self.press("r1", 2)
         self.step(3)
-        self.assertTrue(self.status()["preview"])
+
+    def test_blind_crash_has_more_stardust_than_pathfinder(self):
+        self.start_game()
+        path_total = self.status()["dustTotal"]
+        self.press("select", 2)
+        self.press("down", 2)
+        self.press("a", 3)                                                    # Blind Crash from the Select menu
+        self.assertEqual(self.status()["mode"], "blind")
+        self.assertEqual(self.status()["dustTotal"], 10)
+        self.assertLess(path_total, 5)
+
+    def test_each_stardust_mends_one_hp(self):
+        self.start_blind()
+        self.game.host.ctx.eval("window.slingshotGrant(10)")
+        self.collect_one_dust()
+        self.assertEqual((self.status()["hp"], self.status()["stardust"], self.status()["guide"]), (11, 1, False))
+
+    def test_stardust_at_full_hp_turns_the_route_line_on(self):
+        self.start_blind()
+        self.collect_one_dust()
+        status = self.status()
+        self.assertEqual((status["hp"], status["guide"]), (20, True))         # nothing to mend, so the route line comes on
         self.goto(2)
-        self.assertFalse(self.status()["guide"])                              # the line lasts for one orbit
+        self.assertFalse(self.status()["guide"])                              # for this orbit only
 
-    def test_repair_stops_at_full_hull(self):
-        self.start_blind()
-        self.game.host.ctx.eval("window.slingshotGrant(20, 9)")
-        self.press("x", 2)
-        self.assertEqual((self.status()["hp"], self.status()["stardust"]), (20, 9))
-
-    def test_stardust_on_the_route_is_collected(self):
-        self.start_blind()
-        self.game.host.ctx.eval("window.slingshotGoto(1)")
-        self.fly_stored_launch("1:1")
-        self.assertEqual(self.status()["state"], "won")
-        self.assertEqual(self.status()["stardust"], self.status()["dust"])
+    def test_stardust_does_nothing_in_pathfinder(self):
+        self.start_game()
+        self.collect_one_dust()
+        self.assertEqual((self.status()["hp"], self.status()["guide"]), (20, False))
 
     def test_blind_crash_can_be_won_with_the_stored_launches(self):
         self.start_blind()

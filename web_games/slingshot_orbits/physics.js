@@ -435,11 +435,11 @@ function solveLevel(L, slack, design) {
   return route;
 }
 
-// 2 to 4 stardust per level, scattered in open space and kept well clear of the intended
-// route so they do not point at the answer.
-function scatterDust(L, sol) {
-  const rnd = mulberry32((L.seed ^ 0x51ed270b) >>> 0);
-  const count = 2 + Math.floor(rnd() * 3);
+// Stardust scattered in open space and kept clear of the intended route so it does not point at the answer.
+// count 2 to 4 (Pathfinder) when not given. Blind Crash uses a bigger set: scatterDust(L, sol, 10, 'blind').
+function scatterDust(L, sol, wanted, salt) {
+  const rnd = mulberry32((L.seed ^ (salt === 'blind' ? 0x7a3c19d5 : 0x51ed270b)) >>> 0);
+  const count = wanted || 2 + Math.floor(rnd() * 3);
   const rec = [];
   sim(L, sol.vx, sol.vy, rec);
   const routeClear = (x, y) => {
@@ -448,15 +448,16 @@ function scatterDust(L, sol) {
     return m;
   };
   const out = [];
-  for (let tries = 0; out.length < count && tries < 900; tries++) {
-    const x = W * (0.05 + 0.9 * rnd()), y = H * (0.06 + 0.88 * rnd());
-    if (routeClear(x, y) < (tries > 500 ? 36 : 56)) continue;
-    if (!L.planets.every(p => Math.hypot(p.x - x, p.y - y) > p.r + 27)) continue;
-    if (!L.rocks.every(q => Math.hypot(q.x - x, q.y - y) > q.r + 20)) continue;
-    if (Math.hypot(x - L.start.x, y - L.start.y) < 60) continue;
-    if (Math.hypot(x - L.goal.x, y - L.goal.y) < GOAL_R + 40) continue;
+  for (let tries = 0; out.length < count && tries < 4000; tries++) {
+    const loose = wanted ? Math.min(1, tries / 3000) : (tries > 500 ? 1 : 0);     // relax spacing when the board is crowded
+    const x = W * (0.04 + 0.92 * rnd()), y = H * (0.05 + 0.9 * rnd());
+    if (routeClear(x, y) < (loose ? 34 : 56)) continue;
+    if (!L.planets.every(p => Math.hypot(p.x - x, p.y - y) > p.r + (loose ? 22 : 27))) continue;
+    if (!L.rocks.every(q => Math.hypot(q.x - x, q.y - y) > q.r + 18)) continue;
+    if (Math.hypot(x - L.start.x, y - L.start.y) < 50) continue;
+    if (Math.hypot(x - L.goal.x, y - L.goal.y) < GOAL_R + 36) continue;
     if (inDial(x, y)) continue;
-    if (!out.every(d => Math.hypot(d.x - x, d.y - y) > 93)) continue;
+    if (!out.every(d => Math.hypot(d.x - x, d.y - y) > (wanted ? 62 - 16 * loose : 93))) continue;
     out.push({ x, y, got: false, ph: rnd() * TAU });
   }
   return out;
