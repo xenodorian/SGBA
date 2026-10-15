@@ -27,6 +27,8 @@ typedef struct Natives {
     int storage_dirty;
     /* the HTML overlay panel (menus drawn by shell/overlay.js) */
     int ov_cid, ov_x, ov_y, ov_w, ov_h, ov_modal, ov_changed;
+    /* the page called window.close(): leave the game as if Quit was chosen in the pause menu */
+    int quit_req;
     /* images announced by the page, decoded one per tick */
     int *preload;
     int preload_count, preload_cap;

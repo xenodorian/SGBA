@@ -18,7 +18,7 @@
   <button id="btn-diffback">Back</button>
   <button id="btn-title">Change mode</button>
   <button id="btn-back">Back to orbit</button>
-  <button id="btn-quit">Quit to title</button>
+  <button id="btn-quit">Quit game</button>
 </div>
 <script src="physics.js"></script>
 <script src="levels.js"></script>
@@ -58,7 +58,8 @@ const GRID = 8, GW = Math.ceil(WORLD_W / GRID), GH = Math.ceil(WORLD_H / GRID); 
 const LAUNCH_BUTTON = 5, RETRY_BUTTON = 9, MENU_BUTTON = 8, A_BUTTON = 0, B_BUTTON = 1;
 const MAX_HP = 20;                          // Blind Crash: hull points for the whole run
 // Blind Crash difficulty. Hard is the original rules. Medium: each stardust mends 2 HP. Easy: twice the stardust (20 a level).
-const DIFFS = { easy: { name: 'Easy', heal: 1, dust: 20 }, medium: { name: 'Medium', heal: 2, dust: 10 }, hard: { name: 'Hard', heal: 1, dust: 10 } };
+// Easy and Medium also mend 1 HP when an orbit is cleared (`clear`).
+const DIFFS = { easy: { name: 'Easy', heal: 1, dust: 20, clear: 1 }, medium: { name: 'Medium', heal: 2, dust: 10, clear: 1 }, hard: { name: 'Hard', heal: 1, dust: 10, clear: 0 } };
 const DPAD_UP = 12, DPAD_DOWN = 13, DPAD_LEFT = 14, DPAD_RIGHT = 15;
 const AIM_RATE = 1.3, POWER_RATE = 0.45, FINE = 0.2;   // radians per second, power per second, fine-control factor
 
@@ -381,7 +382,9 @@ function win() {
     try { localStorage.setItem(mode === 'blind' ? 'slingshot-best-blind' + (difficulty === 'hard' ? '' : '-' + difficulty) : 'slingshot-best', String(best)); } catch (e) {}
   }
   burst(S.L.goal.x, S.L.goal.y, 120, 190, 260);
-  showMsg((S.orbit >= FINAL_ORBIT ? 'Final orbit clear' : 'Orbit clear') + '  +' + bonus, 2400);
+  let mend = '';
+  if (mode === 'blind' && DIFFS[difficulty].clear && hp < MAX_HP) { hp = Math.min(MAX_HP, hp + DIFFS[difficulty].clear); mend = '  HP ' + hp; }
+  showMsg((S.orbit >= FINAL_ORBIT ? 'Final orbit clear' : 'Orbit clear') + '  +' + bonus + mend, 2400);
 }
 
 function update(dt) {
@@ -530,11 +533,11 @@ function showPanel(kind) {
   } else if (diff) {
     menuTitle.textContent = 'Blind Crash';
     menuIntro.textContent = 'Choose a difficulty.';
-    menuNote.textContent = 'Easy: twice the stardust. Medium: each stardust mends 2 HP. Hard: the standard rules.';
+    menuNote.textContent = 'Easy: twice the stardust. Medium: each stardust mends 2 HP. Both mend 1 HP per cleared orbit. Hard: the standard rules.';
   } else if (pause) {
     menuTitle.textContent = 'Paused';
     menuIntro.textContent = modeLabel() + ', orbit ' + S.orbit + ' of ' + FINAL_ORBIT + '.';
-    menuNote.textContent = 'Quit to title ends this run.';
+    menuNote.textContent = 'Quit game closes Slingshot Orbits.';
   } else {
     menuTitle.textContent = 'Slingshot Orbits';
     menuIntro.textContent = 'Pick a mode.';
@@ -558,9 +561,11 @@ function finishGame() {
   openMenu('win');
 }
 
-function quitToTitle() {
-  S = null; cache = null; finished = false; over = false;
-  openMenu('title');
+// Quit leaves the game (window.close(): the runtime returns to the launcher, or exits a direct launch). A runtime that
+// cannot close the page ignores the call, so after a moment the game falls back to the title screen.
+function quitGame() {
+  try { window.close(); } catch (e) {}
+  setTimeout(() => { S = null; cache = null; finished = false; over = false; openMenu('title'); }, 600);
 }
 
 function gameOver() {
@@ -600,7 +605,7 @@ btnHard.addEventListener('click', () => startGame('blind', 'hard'));
 btnDiffBack.addEventListener('click', () => showPanel('title'));
 btnTitle.addEventListener('click', () => { finished = false; over = false; showPanel('title'); });
 btnBack.addEventListener('click', closeMenu);
-btnQuit.addEventListener('click', quitToTitle);
+btnQuit.addEventListener('click', quitGame);
 showPanel('title');
 
 // ---------- effects ----------

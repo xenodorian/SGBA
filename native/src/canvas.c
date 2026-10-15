@@ -1122,6 +1122,7 @@ NATIVE(n_overlay_set) {
     n->ov_changed = 1;
     return JS_UNDEFINED;
 }
+NATIVE(n_quit) { Natives *n = NAT(); n->quit_req = 1; return JS_UNDEFINED; }
 NATIVE(n_overlay_modal) { Natives *n = NAT(); int m = js_arg_i(ctx, argv, 0); if (m != n->ov_modal) { n->ov_modal = m; } return JS_UNDEFINED; }
 NATIVE(n_measure_h) {
     Natives *n = NAT(); Canvas *c = cv_get(n, js_arg_i(ctx, argv, 0)); if (!c) return JS_UNDEFINED;
@@ -1433,7 +1434,7 @@ void canvas_register(Host *h, Natives *n, JSContext *ctx) {
     REG("__py_save", n_save, 1); REG("__py_restore", n_restore, 1); REG("__py_drawImage", n_drawImage, 3);
     REG("__py_measure", n_measure, 2); REG("__py_getimage", n_getimage, 5); REG("__py_putimage", n_putimage, 6);
     REG("__py_group_begin", n_group_begin, 2); REG("__py_group_end", n_group_end, 1);
-    REG("__sgba_overlay_set", n_overlay_set, 5); REG("__sgba_overlay_modal", n_overlay_modal, 1); REG("__py_measure_h", n_measure_h, 1);
+    REG("__sgba_overlay_set", n_overlay_set, 5); REG("__sgba_overlay_modal", n_overlay_modal, 1); REG("__sgba_quit", n_quit, 0); REG("__py_measure_h", n_measure_h, 1);
     n->ov_cid = -1;
 #undef REG
     JS_FreeValue(ctx, g);

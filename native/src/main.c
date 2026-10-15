@@ -111,7 +111,7 @@ static void compose_overlay(Surf *composed, const Surf *surface, const Surf *pan
     r_blit(composed, panel, 0, 0, panel->w, panel->h, px, py, panel->w, panel->h, 0, 0, 255, COMP_OVER, KIND_ALPHA, all);
 }
 
-enum { END_QUIT = 0, END_PAUSE, END_CHOICE };
+enum { END_QUIT = 0, END_PAUSE, END_CHOICE, END_LEAVE };
 
 extern const unsigned char shell_html[];
 
@@ -153,6 +153,7 @@ static int run_loop(Display *disp, Input *in, Host *h, int is_game, double max_s
             } else input_event(in, &e);
         }
         if (quit) return END_QUIT;
+        if (is_game && nat->quit_req) { result = END_LEAVE; break; }              /* the page called window.close() */
         int combo = input_down(in, A_START, 0) && input_down(in, A_SELECT, 0);
         if (!combo) armed = 1;
         else if (is_game && armed) { result = END_PAUSE; break; }
@@ -298,6 +299,7 @@ static int run_interactive(const char *game, const char *save, const char *app_d
         while (!over) {
             int rc = run_loop(disp, in, h, 1, max_seconds, &started);
             if (rc == END_QUIT) { over = 2; break; }
+            if (rc == END_LEAVE) { over = 1; break; }                                   /* same as Quit in the pause menu */
             int m = run_menu(disp, in, "pause", max_seconds, &started);                 /* Start+Select: the pause menu */
             if (m == END_QUIT) { over = 2; break; }
             if (!strcmp(g_app->choice, "quit")) { over = 1; break; }

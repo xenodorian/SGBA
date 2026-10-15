@@ -284,7 +284,7 @@ class SlingshotTests(unittest.TestCase):
         self.assertLess(path_total, 5)
         self.assertEqual(len(self.levels["1:1"]["bdust"]), 20)
 
-    def test_pause_menu_resumes_or_quits_to_the_title(self):
+    def test_pause_menu_resumes_or_quits(self):
         self.start_game()
         self.press("select", 2)
         self.assertTrue(self.status()["menu"])
@@ -294,7 +294,8 @@ class SlingshotTests(unittest.TestCase):
         self.assertEqual(status["orbit"], 1)
         self.press("select", 2)
         self.press("down", 2)
-        self.press("a", 3)                                                    # Quit to title
+        self.press("a", 3)                                                    # Quit game
+        self.step(60)                                                         # this host cannot close the page, so the game falls back to the title
         self.assertEqual(self.game.host.ctx.eval("String(window.slingshotStatus())"), "null")
         self.press("a", 3)                                                    # the title menu works again: Pathfinder
         self.assertEqual((self.status()["mode"], self.status()["orbit"]), ("path", 1))
@@ -334,6 +335,16 @@ class SlingshotTests(unittest.TestCase):
         self.start_game()
         self.collect_one_dust()
         self.assertEqual((self.status()["hp"], self.status()["guide"]), (20, False))
+
+    def test_clearing_an_orbit_mends_one_hp_on_easy_and_medium_but_not_hard(self):
+        for difficulty, expect in (("easy", 11), ("medium", 11), ("hard", 10)):
+            with self.subTest(difficulty=difficulty):
+                self.setUp()
+                self.start_blind(difficulty)
+                self.game.host.ctx.eval("window.slingshotGrant(10)")
+                self.fly_stored_launch("1:1")
+                self.assertEqual(self.status()["state"], "won")
+                self.assertEqual(self.status()["hp"], expect)
 
     def test_blind_crash_can_be_won_with_the_stored_launches(self):
         self.start_blind()

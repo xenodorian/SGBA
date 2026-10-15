@@ -533,7 +533,7 @@
   g.history = { pushState() {}, replaceState() {}, back() {}, state: null };
   g.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
   g.getComputedStyle = () => makeStyle();
-  g.focus = () => {}; g.blur = () => {}; g.scrollTo = () => {}; g.open = () => null; g.alert = () => {}; g.confirm = () => false; g.prompt = () => null;
+  g.focus = () => {}; g.blur = () => {}; g.scrollTo = () => {}; g.open = () => null; g.close = () => { if (typeof g.__sgba_quit === 'function') g.__sgba_quit(); }; g.alert = () => {}; g.confirm = () => false; g.prompt = () => null;
   g.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   g.MutationObserver = class { observe() {} disconnect() {} };
   g.IntersectionObserver = class { observe() {} disconnect() {} };
