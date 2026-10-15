@@ -1,13 +1,13 @@
 // Precomputes the Slingshot Orbits levels that the game loads from web_games/slingshot_orbits/levels.js.
 //
-// The level search takes 0.3 to 3 s per orbit in V8. SGBA runs the page in QuickJS, which is far too slow
+// The level search takes up to a minute or two per orbit in V8. SGBA runs the page in QuickJS, which is far too slow
 // for that, so the search runs here once. It uses the same physics.js the game loads, so the stored levels
 // are the ones the browser build produces. Each stored launch is re-simulated and must win.
 //
 // Usage:  node tools/slingshot_levels.js            (writes web_games/slingshot_orbits/levels.js)
 //         node tools/slingshot_levels.js 3:6 4:9   (print only these keys; levels.js is not written)
-// Keys are "orbit:planets". Orbits 1 to 20 cover every starting planet count (planets = start + orbit - 1,
-// capped at 20). Orbits 21 to 30 are all 20-planet levels; the game repeats them in a cycle after that.
+// Keys are "orbit:planets"; the campaign needs only "n:n" for orbits 1 to 20. Each level stores its own random
+// ship start and portal position.
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -19,30 +19,32 @@ const physics = new Function(fs.readFileSync(path.join(folder, "physics.js"), "u
 const r4 = (v) => Math.round(v * 1e4) / 1e4;
 function pack(orbit, P0) {
   const t0 = Date.now();
-  const { L, sol } = physics.buildLevel(orbit, P0);
+  const built = physics.buildLevel(orbit, P0);
+  if (!built) throw new Error(`no level for ${orbit}:${P0}`);
+  const { L, sol } = built;
   const level = {
     planets: L.planets.map(p => [r4(p.x), r4(p.y), r4(p.r), r4(p.m), r4(p.hue), p.ring ? 1 : 0, r4(p.tilt), r4(p.spin)]),
     rocks: L.rocks.map(q => [r4(q.x), r4(q.y), r4(q.r), r4(q.seed)]),
+    start: [r4(L.start.x), r4(L.start.y)],
     goal: [r4(L.goal.x), r4(L.goal.y)],
     dust: L.dust.map(d => [r4(d.x), r4(d.y), r4(d.ph)]),
     sol: [r4(sol.vx), r4(sol.vy), sol.tol, sol.strict ? 1 : 0, sol.shortcuts],
   };
   // The game simulates from the stored numbers, so the launch is checked against exactly those.
   const check = {
-    start: L.start,
+    start: { x: level.start[0], y: level.start[1] },
     goal: { x: level.goal[0], y: level.goal[1] },
     planets: level.planets.map(a => ({ x: a[0], y: a[1], r: a[2], m: a[3] })),
     rocks: level.rocks.map(a => ({ x: a[0], y: a[1], r: a[2] })),
   };
   const won = physics.sim(check, level.sol[0], level.sol[1], null);
   return { key: `${orbit}:${P0}`, level, ms: Date.now() - t0, won: won === 1, planets: L.planets.length,
-    strict: sol.strict, tol: sol.tol, shortcuts: sol.shortcuts };
+    strict: sol.strict, tol: sol.tol, shortcuts: sol.shortcuts, bends: sol.bends, turn: sol.turn };
 }
 
 const args = process.argv.slice(2);
 const jobs = [];
-for (let n = 1; n <= 20; n++) for (let P = n; P <= 20; P++) jobs.push([n, P]);
-for (let n = 21; n <= 30; n++) jobs.push([n, 20]);
+for (let n = 1; n <= 20; n++) jobs.push([n, n]);     // the campaign: orbit N has N planets
 const only = args.length ? new Set(args) : null;
 const out = {};
 let failures = 0;
@@ -51,7 +53,7 @@ for (const [n, P] of jobs) {
   const r = pack(n, P);
   if (!r.won) failures++;
   out[r.key] = r.level;
-  console.log(`${r.key.padEnd(7)} planets ${String(r.planets).padStart(2)}  strict ${r.strict ? "yes" : "no "}  tol ${String(r.tol).padStart(2)}  shortcuts ${String(r.shortcuts).padStart(2)}  wins ${r.won ? "yes" : "NO "}  ${r.ms} ms`);
+  console.log(`${r.key.padEnd(7)} planets ${String(r.planets).padStart(2)}  strict ${r.strict ? "yes" : "no "}  tol ${String(r.tol).padStart(2)}  shortcuts ${String(r.shortcuts).padStart(2)}  bends ${r.bends}  turn ${r.turn}  wins ${r.won ? "yes" : "NO "}  ${r.ms} ms`);
 }
 if (failures) { console.error(`${failures} stored launch(es) do not win`); process.exit(1); }
 if (!only) {

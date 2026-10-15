@@ -74,6 +74,18 @@ class SlingshotTests(unittest.TestCase):
         self.press("a", 3)               # Launch is the first row of the menu
         self.assertEqual(self.status()["orbit"], 1)
 
+    def start_blind(self):
+        self.step(5)
+        self.press("down", 2)            # second row of the title menu: Blind Crash
+        self.press("a", 3)
+        self.assertEqual(self.status()["mode"], "blind")
+
+    def aim_at(self, angle, power):
+        phi = power * 2 * math.pi + math.pi / 2
+        self.pad.axes = [-math.cos(angle), -math.sin(angle), math.cos(phi), -math.sin(phi)]
+        self.step(4)
+        self.pad.axes = [0.0] * 4
+
     def dial_at(self, x, y):
         """Hold the right stick at (x, y) and return the power the page reads."""
         self.pad.axes[2], self.pad.axes[3] = x, y
@@ -170,6 +182,100 @@ class SlingshotTests(unittest.TestCase):
         self.assertEqual(self.status()["state"], "won")
         self.assertEqual(self.status()["total"], 500 + 2 * 250)              # orbit bonus with two shots left
         self.assertEqual([m for m in self.messages if m[0] == "error"], [])
+
+    # ---------- the title menu and Blind Crash ----------
+    def test_title_menu_first_row_is_pathfinder(self):
+        self.start_game()
+        status = self.status()
+        self.assertEqual((status["mode"], status["hp"]), ("path", 20))
+        self.aim_at(0.3, 0.5)
+        self.assertTrue(self.status()["preview"])                            # Pathfinder shows the route line
+
+    def test_every_level_stores_its_own_start_and_goal(self):
+        starts = {tuple(self.levels[f"{n}:{n}"]["start"]) for n in range(1, 21)}
+        self.assertGreater(len(starts), 15)                                   # random ship positions, not one fixed spot
+        for n in range(1, 21):
+            lv = self.levels[f"{n}:{n}"]
+            for x, y in (lv["start"], lv["goal"]):
+                self.assertTrue(0 < x < 640 and 0 < y < 480)
+
+    def test_blind_crash_starts_with_20_hp_and_no_route_line(self):
+        self.start_blind()
+        status = self.status()
+        self.assertEqual((status["hp"], status["stardust"], status["orbit"], status["guide"]), (20, 0, 1, False))
+        self.aim_at(0.3, 0.5)
+        self.assertFalse(self.status()["preview"])
+
+    def test_blind_crash_costs_hp_and_relaunches_from_the_start(self):
+        self.start_blind()
+        sx, sy = self.levels["1:1"]["start"]
+        self.aim_at(math.pi if sx > 320 else 0.0, 0.9)                        # straight at the nearer wall, full power
+        self.press("r1", 2)
+        for _ in range(60 * 14):
+            self.step(1)
+            if self.status()["state"] == "dead":
+                break
+        self.assertEqual(self.status()["hp"], 19)
+        self.step(90)
+        status = self.status()
+        self.assertEqual((status["state"], status["orbit"], status["hp"], status["menu"]), ("idle", 1, 19, False))
+        self.assertAlmostEqual(status["x"], sx, places=1)                     # launches again from the same spot
+        self.assertAlmostEqual(status["y"], sy, places=1)
+
+    def test_zero_hp_is_game_over_and_try_again_restarts(self):
+        self.start_blind()
+        self.game.host.ctx.eval("window.slingshotGrant(1, 0)")
+        sx = self.levels["1:1"]["start"][0]
+        self.aim_at(math.pi if sx > 320 else 0.0, 0.9)
+        self.press("r1", 2)
+        self.step(60 * 14)
+        status = self.status()
+        self.assertTrue(status["over"] and status["menu"])
+        self.assertEqual(status["hp"], 0)
+        self.press("a", 3)                                                    # Try again
+        status = self.status()
+        self.assertEqual((status["mode"], status["hp"], status["orbit"], status["over"], status["menu"]), ("blind", 20, 1, False, False))
+
+    def test_stardust_repairs_for_three_and_route_line_for_ten(self):
+        self.start_blind()
+        self.game.host.ctx.eval("window.slingshotGrant(10, 2)")
+        self.press("x", 2)
+        self.assertEqual((self.status()["hp"], self.status()["stardust"]), (10, 2))   # two is not enough
+        self.game.host.ctx.eval("window.slingshotGrant(10, 13)")
+        self.press("x", 2)
+        self.assertEqual((self.status()["hp"], self.status()["stardust"]), (11, 10))
+        self.aim_at(0.3, 0.5)
+        self.press("y", 2)
+        status = self.status()
+        self.assertEqual((status["guide"], status["stardust"]), (True, 0))
+        self.step(3)
+        self.assertTrue(self.status()["preview"])
+        self.goto(2)
+        self.assertFalse(self.status()["guide"])                              # the line lasts for one orbit
+
+    def test_repair_stops_at_full_hull(self):
+        self.start_blind()
+        self.game.host.ctx.eval("window.slingshotGrant(20, 9)")
+        self.press("x", 2)
+        self.assertEqual((self.status()["hp"], self.status()["stardust"]), (20, 9))
+
+    def test_stardust_on_the_route_is_collected(self):
+        self.start_blind()
+        self.game.host.ctx.eval("window.slingshotGoto(1)")
+        self.fly_stored_launch("1:1")
+        self.assertEqual(self.status()["state"], "won")
+        self.assertEqual(self.status()["stardust"], self.status()["dust"])
+
+    def test_blind_crash_can_be_won_with_the_stored_launches(self):
+        self.start_blind()
+        self.goto(20)
+        self.fly_stored_launch("20:20")
+        self.assertEqual(self.status()["state"], "won")
+        self.step(60 * 3)
+        status = self.status()
+        self.assertTrue(status["finished"] and status["menu"])
+        self.press("a", 3)                                                    # Play again keeps the mode
+        self.assertEqual((self.status()["mode"], self.status()["orbit"]), ("blind", 1))
 
 
 if __name__ == "__main__":

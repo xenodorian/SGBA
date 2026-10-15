@@ -4,7 +4,7 @@
 
 // ---------- constants ----------
 // The world is a fixed 640x480 on every screen. Physics constants are the earlier tuned values times K = 2/3.
-const WORLD_W = 640, WORLD_H = 480, K = 2 / 3, START_X = 0.36;
+const WORLD_W = 640, WORLD_H = 480, K = 2 / 3;
 let W = WORLD_W, H = WORLD_H;
 const G = 1600;         // gravitational constant
 const SOFT = 47;        // softening length: smooths close passes so winning launches form wider sweet spots
@@ -14,13 +14,9 @@ const GOAL_R = 32;      // portal capture radius, drawn at this size too
 const DT = 1 / 120;     // fixed physics timestep, shared by game, predictor and solver
 const MAX_STEPS = 1400; // ~11.7 simulated seconds before a shot is declared drifting
 const SHOTS = 3;
-// Pull curve: launch speed grows with a power of pull distance, so small pulls
-// are gentle and the whole stretch of the sling is usable. Holding Shift steepens
-// the curve (exponent 2.2) for finer control near full power.
-const PULL_EXP = 2.4, PULL_EXP_FINE = 3.2, DEAD_ZONE = 5;
 const TAU = Math.PI * 2;
 const MAX_PLANETS = 20;
-let TOL_MIN = 6;      // a level is kept only if its best launch survives +/-6 world px of pointer error
+let TOL_MIN = 3;      // a level is kept only if its route survives +/-TOL_MIN steps of aim (0.25 deg) and power (0.5 percent)
 const MAX_FLIGHT = 14;  // seconds before a captured or drifting ship is written off
 
 // ---------- seeded PRNG (mulberry32) ----------
@@ -33,8 +29,7 @@ function mulberry32(a) {
   };
 }
 
-// ---------- canvas-free helpers ----------
-// ---------- level generation ----------
+// ---------- rocks ----------
 // Rocks are large clusters of overlapping circles shaped like rough ovals, rounds, squares and
 // rectangles. Each cluster is a separate lump; nothing connects to the screen edge.
 function rockShape(cx, cy, rnd, kind, size, ang) {
@@ -60,48 +55,145 @@ function rockShape(cx, cy, rnd, kind, size, ang) {
   return lobes;
 }
 
-function wallsFor(P) { return 1; }          // number of blocker rocks placed across the direct line
-function minBendsFor(P) { return 1; }
+// ---------- level generation ----------
+// The ship and the portal are placed at random, close together on some orbits and far apart on others. The
+// planets are laid along a meandering axis from ship to portal, alternating sides, so the winning flight
+// has to swing round one planet after another: a snaking line rather than a clean curve.
+const EDGE_PAD = 44;
+function inDial(x, y) { return x < 125 && y > 355; }     // the power dial is drawn in the bottom-left corner
 
-function genLevel(orbit, seed, P, B) {
+function planetRadii(P) {
+  const dim = Math.min(W, H), hi = dim * Math.max(0.055, 0.11 - 0.003 * P);
+  return [hi * 0.64, hi];
+}
+
+// Arc-length table of a recorded flight [x0,y0,x1,y1,...]: s[i] is the distance flown to point i.
+function arcOf(rec) {
+  const n = rec.length / 2, s = new Float64Array(n);
+  for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(rec[2 * i] - rec[2 * i - 2], rec[2 * i + 1] - rec[2 * i - 1]);
+  return s;
+}
+function pointAt(rec, arc, d) {          // point on the flight d px from the start, with its unit normal
+  let lo = 0, hi = arc.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (arc[m] < d) lo = m; else hi = m; }
+  const tx = rec[2 * hi] - rec[2 * lo], ty = rec[2 * hi + 1] - rec[2 * lo + 1], tl = Math.hypot(tx, ty) || 1;
+  return { x: rec[2 * hi], y: rec[2 * hi + 1], nx: -ty / tl, ny: tx / tl, i: hi };
+}
+
+// The ship and the portal are placed at random, close together on some orbits and far apart on others.
+// The layout is grown along a real flight: a launch is chosen first, then each planet is dropped just beside the
+// path that launch is flying, on alternating sides, and the flight is re-simulated. Every planet therefore bends
+// the path one way and then the next planet bends it back, so the intended route snakes from planet to planet.
+// The portal goes where the finished snake ends. Returns { L, design: { vx, vy } } or null if the growth failed.
+function genLevel(orbit, seed, P) {
   const rnd = mulberry32(seed);
   const R = (a, b) => a + (b - a) * rnd();
-  const dim = Math.min(W, H);
-  const start = { x: W * START_X, y: H * 0.5 };
-  const goal = { x: W * 0.91, y: H * R(0.34, 0.66) };
-  const rocks = [];
-  // blockers: big lumps centred on the straight line from ship to portal
-  const ux = goal.x - start.x, uy = goal.y - start.y, len = Math.hypot(ux, uy), nx = -uy / len, ny = ux / len;
-  for (let i = 0; i < B; i++) {
-    const t = B === 1 ? R(0.42, 0.58) : (i === 0 ? R(0.30, 0.42) : R(0.58, 0.72));
-    const off = B === 1 ? R(-0.05, 0.05) * H : (i === 0 ? 1 : -1) * R(0.03, 0.10) * H;
-    const sh = rockShape(start.x + ux * t + nx * off, start.y + uy * t + ny * off, rnd, Math.floor(rnd() * 4), R(100, 140), R(0, TAU));
-    for (const q of sh) rocks.push(q);
+  const bands = [[120, 260], [260, 400], [400, 580]], band = bands[(orbit * 2 + 1) % 3];
+  let start = null;
+  for (let t = 0; t < 200 && !start; t++) {
+    const sx = R(EDGE_PAD, W - EDGE_PAD), sy = R(EDGE_PAD, H - EDGE_PAD);
+    if (!inDial(sx, sy)) start = { x: sx, y: sy };
   }
-  const planets = [];
+  const L = { orbit, seed, start, goal: { x: -1e5, y: -1e5 }, planets: [], rocks: [], dust: [] };
+  const [rLo, rHi] = planetRadii(P);
   const mk = (x, y, r) => ({ x, y, r, m: r * r * 1.4, hue: R(0, 360), ring: rnd() < 0.35, tilt: R(-0.6, 0.6), spin: R(0.05, 0.2) });
-  let up = rnd() < 0.5;
-  for (let i = 0; i < Math.min(B, P); i++) {
+  // launch: toward a random spot in the middle of the board, at a modest speed so planets can bend it
+  const tx = R(W * 0.25, W * 0.75), ty = R(H * 0.25, H * 0.75), ang = Math.atan2(ty - start.y, tx - start.x);
+  const sp = R(110, 200);
+  let vx = Math.cos(ang) * sp, vy = Math.sin(ang) * sp;
+  let rec = [], arc = null;
+  const fly = () => { rec = []; sim(L, vx, vy, rec); arc = arcOf(rec); return arc[arc.length - 1]; };
+  fly();
+  let budget = 600;
+  const gaps = [];
+  for (let i = 0; i < P; i++) gaps.push(R(0.85, 1.2) * (2.2 * (rLo + rHi) / 2 + 40));
+  const deep = { i: -1, planets: [], st: 0 };
+  const grow = (i, st, side, sgn) => {
+    if (i > deep.i) { deep.i = i; deep.planets = L.planets.slice(); deep.st = st; }
+    if (i === P) return st;
+    const need = st + gaps[i] + 70, cands = [];
     for (let t = 0; t < 60; t++) {
-      const r = dim * R(0.055, 0.075), x = (B === 1 ? 0.64 : 0.52 + 0.26 * i / (B - 1)) * W + R(-0.02, 0.02) * W;
-      const y = H * 0.5 + (up ? -1 : 1) * H * R(0.12, 0.24);
-      if (rocks.every(q => Math.hypot(q.x - x, q.y - y) > q.r + r + 10)
-        && planets.every(p => Math.hypot(p.x - x, p.y - y) > p.r + r + 24)) { planets.push(mk(x, y, r)); break; }
+      const sd = i === 0 ? side : rnd() < 0.9 ? -side : side;
+      const r = R(rLo, rHi), q = pointAt(rec, arc, st), off = r + R(8, 30);
+      const x = q.x + q.nx * sd * off, y = q.y + q.ny * sd * off;
+      if (x < r + 6 || x > W - r - 6 || y < r + 6 || y > H - r - 6) continue;
+      if (Math.hypot(x - start.x, y - start.y) < r + 40) continue;
+      if (!L.planets.every(p => Math.hypot(p.x - x, p.y - y) > p.r + r + 12)) continue;
+      const planet = mk(x, y, r);
+      L.planets.push(planet);
+      const len = fly();
+      L.planets.pop();
+      if (len < need) continue;
+      let margin = 1e9;
+      for (let j = 0; j < arc.length; j++) if (arc[j] >= st - 20 && arc[j] <= need) margin = Math.min(margin, rec[2 * j], W - rec[2 * j], rec[2 * j + 1], H - rec[2 * j + 1]);
+      const a0 = pointAt(rec, arc, Math.max(0, st - 15)), a1 = pointAt(rec, arc, Math.min(arc[arc.length - 1], need));
+      const h0 = Math.atan2(-a0.nx, a0.ny), h1 = Math.atan2(-a1.nx, a1.ny);
+      let dh = h1 - h0; while (dh > Math.PI) dh -= TAU; while (dh < -Math.PI) dh += TAU;
+      const turn = Math.abs(dh);
+      if (turn < 0.45) continue;                                   // each planet must bend the path by at least ~26 degrees
+      if (sgn !== 0 && dh * sgn > 0) continue;                     // and the bend must reverse the one before: that is the snake
+      const far = Math.hypot(a1.x - W / 2, a1.y - H / 2);          // prefer snakes that stay in the middle of the board
+      cands.push({ planet, sd, dh, score: Math.min(turn, 2.2) * 40 + Math.min(margin, 80) * 0.5 - far * 0.25 + R(0, 25) });
     }
-    up = !up;
-  }
-  const rMax = dim * Math.max(0.036, 0.072 - 0.0025 * P), rMin = dim * 0.028;
-  for (let spacing = 24; planets.length < P && spacing >= 6; spacing -= 6) {
-    for (let t = 0; planets.length < P && t < 3000; t++) {
-      const r = R(rMin, rMax), x = R(W * 0.22, W * 0.88), y = R(H * 0.08, H * 0.92);
-      if (planets.every(p => Math.hypot(p.x - x, p.y - y) > p.r + r + spacing)
-        && rocks.every(q => Math.hypot(q.x - x, q.y - y) > q.r + r + 16)
-        && Math.hypot(x - start.x, y - start.y) > 87
-        && Math.hypot(x - goal.x, y - goal.y) > r + 73)
-        planets.push(mk(x, y, r));
+    fly();
+    cands.sort((u, v) => v.score - u.score);
+    for (let c = 0; c < Math.min(4, cands.length); c++) {
+      if (--budget < 0) return -1;
+      L.planets.push(cands[c].planet); fly();
+      const e = grow(i + 1, st + gaps[i], cands[c].sd, cands[c].dh > 0 ? 1 : -1);
+      if (e >= 0) return e;
+      L.planets.pop(); fly();
     }
+    return -1;
+  };
+  let st = grow(0, R(70, 110), rnd() < 0.5 ? 1 : -1, 0);
+  if (st < 0) {                                  // the snake could not take every planet: keep the longest one grown
+    if (deep.i < Math.min(P, 3)) return null;
+    L.planets = deep.planets; st = deep.st;
   }
-  return { orbit, seed, start, goal, planets, rocks, dust: [] };
+  fly();
+  // the portal sits on the path after the last planet
+  const total = arc[arc.length - 1];
+  let goal = null, gScore = -1e9;
+  for (let d = st - 30; d <= total; d += 6) {
+    const q = pointAt(rec, arc, d), gx = q.x, gy = q.y;
+    if (gx < GOAL_R + 16 || gx > W - GOAL_R - 16 || gy < GOAL_R + 16 || gy > H - GOAL_R - 16 || inDial(gx, gy)) continue;
+    if (!L.planets.every(p => Math.hypot(p.x - gx, p.y - gy) > p.r + GOAL_R + 16)) continue;
+    let early = false;                                       // the path must not touch the portal before its end
+    for (let j = 0; j < q.i && !early; j++) if (arc[j] < d - 70 && (rec[2 * j] - gx) ** 2 + (rec[2 * j + 1] - gy) ** 2 < (GOAL_R + 6) ** 2) early = true;
+    if (early) continue;
+    const dist = Math.hypot(gx - start.x, gy - start.y);
+    const score = -Math.max(0, band[0] - dist, dist - band[1]) + R(0, 12);
+    if (score > gScore) { gScore = score; goal = { x: gx, y: gy }; }
+  }
+  if (!goal) return null;
+  L.goal = goal;
+  if (sim(L, vx, vy, null) !== 1) return null;
+  // planets beyond the snake are scattered clear of the route; each one must leave a winning launch near the design
+  const refit = () => {
+    const a0 = Math.atan2(vy, vx), v0 = Math.hypot(vx, vy), opts = [];
+    for (let da = -3; da <= 3.001; da += 0.25) for (let dv = -0.08; dv <= 0.0801; dv += 0.01) opts.push([Math.abs(da) / 3 + Math.abs(dv) / 0.08, da, dv]);
+    opts.sort((u, w) => u[0] - w[0]);
+    for (const [, da, dv] of opts) {
+      const t = a0 + da * Math.PI / 180, v = v0 * (1 + dv), nx = Math.cos(t) * v, ny = Math.sin(t) * v;
+      if (sim(L, nx, ny, null) === 1) { vx = nx; vy = ny; return true; }
+    }
+    return false;
+  };
+  let routeRec = [];
+  sim(L, vx, vy, routeRec);
+  const routeClear = (x, y) => { let m = 1e9; for (let i = 0; i < routeRec.length; i += 4) m = Math.min(m, Math.hypot(routeRec[i] - x, routeRec[i + 1] - y)); return m; };
+  for (let tries = 0; L.planets.length < P && tries < 600; tries++) {
+    const r = R(rLo, rHi), x = R(r + 8, W - r - 8), y = R(r + 8, H - r - 8);
+    if (Math.hypot(x - start.x, y - start.y) < r + 60 || Math.hypot(x - goal.x, y - goal.y) < r + GOAL_R + 30) continue;
+    if (!L.planets.every(p => Math.hypot(p.x - x, p.y - y) > p.r + r + 14)) continue;
+    if (routeClear(x, y) < r + (tries > 300 ? 40 : 65)) continue;
+    const planet = mk(x, y, r), ovx = vx, ovy = vy;
+    L.planets.push(planet);
+    if (refit()) { routeRec = []; sim(L, vx, vy, routeRec); } else { L.planets.pop(); vx = ovx; vy = ovy; }
+  }
+  if (L.planets.length < P) return null;
+  return { L, design: { vx, vy } };
 }
 
 // ---------- physics: one function drives game, predictor and solver ----------
@@ -133,9 +225,20 @@ function sim(L, vx, vy, rec) {
   return 0;
 }
 
+// Total turning of a flight in degrees (every swing round a planet adds to it), a second measure of how snaking it is.
+function totalTurn(rec) {
+  let sum = 0, prev = null;
+  for (let i = 8; i < rec.length; i += 8) {
+    const a = Math.atan2(rec[i + 1] - rec[i - 7], rec[i] - rec[i - 8]);
+    if (prev !== null) { let d = a - prev; while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU; sum += Math.abs(d); }
+    prev = a;
+  }
+  return sum * 180 / Math.PI;
+}
+
 // Counts orbital bends in a recorded flight path. The heading is unwrapped, then a
-// zigzag filter with 8 degree hysteresis finds the turning runs. A bend is a run of
-// monotone turning of at least 30 degrees.
+// zigzag filter with 5 degree hysteresis finds the turning runs. A bend is a run of
+// monotone turning of at least 14 degrees, so every swing round a planet counts.
 function countBends(rec) {
   const step = 8;
   const th = [];
@@ -152,7 +255,7 @@ function countBends(rec) {
     prev = a;
   }
   if (th.length < 2) return 0;
-  const HY = 8 * Math.PI / 180, MB = 30 * Math.PI / 180;
+  const HY = 5 * Math.PI / 180, MB = 14 * Math.PI / 180;
   const piv = [th[0]];
   let dir = 0, ext = th[0];
   for (let i = 1; i < th.length; i++) {
@@ -167,26 +270,31 @@ function countBends(rec) {
   return n;
 }
 
-// Pointer-to-launch mapping, inverted: how far back the player must pull for a given speed.
-function pullRange() { return W * START_X - 32; }   // the ship starts 30% in; the pointer must stay on screen
-function pullFor(m) { return Math.pow(m / VMAX, 1 / PULL_EXP) * pullRange() + DEAD_ZONE; }
-function speedFor(d) { return VMAX * Math.pow(Math.min(1, Math.max(0, d - DEAD_ZONE) / pullRange()), PULL_EXP); }
-
-// A launch is reachable only if the pointer position that produces it is inside the window.
-function reachableAim(L, vx, vy) {
-  const m = Math.hypot(vx, vy), d = pullFor(m);
-  const px = L.start.x - vx / m * d, py = L.start.y - vy / m * d;
-  return px >= 20 && px <= W - 20 && py >= 20 && py <= H - 20;
+// ---------- aim and power ----------
+// The player aims with an angle and a power dial, so a launch is (angle, power). A launch has margin k when every
+// launch within +/- k * ANG_STEP degrees and +/- k * POW_STEP percent of its speed still wins.
+const ANG_STEP = 0.25, POW_STEP = 0.5;
+function toleranceOf(L, vx, vy, maxK) {
+  const ang = Math.atan2(vy, vx), sp = Math.hypot(vx, vy);
+  let best = 0;
+  for (let k = 1; k <= (maxK || 24); k++) {
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) {
+      if (!a && !b) continue;
+      const th = ang + a * k * ANG_STEP * Math.PI / 180, v = sp * (1 + b * k * POW_STEP / 100);
+      if (sim(L, Math.cos(th) * v, Math.sin(th) * v, null) !== 1) return best;
+    }
+    best = k;
+  }
+  return best;
 }
 
-// Every reachable launch that wins, over a dAng degree by nSp speed grid.
+// Every launch that wins over a dAng degree by nSp speed grid (speed 20 to 100 percent of VMAX).
 function sweepWins(L, dAng, nSp) {
   const wins = [];
   for (let k = 0; k < nSp; k++) {
     const sp = VMAX * (0.2 + 0.8 * k / (nSp - 1));
     for (let a = 0; a < 360; a += dAng) {
       const t = a * Math.PI / 180, vx = Math.cos(t) * sp, vy = Math.sin(t) * sp;
-      if (!reachableAim(L, vx, vy)) continue;
       const rec = [];
       if (sim(L, vx, vy, rec) === 1) wins.push({ vx, vy, b: countBends(rec) });
     }
@@ -194,56 +302,71 @@ function sweepWins(L, dAng, nSp) {
   return wins;
 }
 
-// Sweet spot size: the largest radius (px) around the pointer position within which every
-// sampled pointer position still wins. Bigger means a more forgiving shot.
-function toleranceOf(L, vx, vy) {
-  const m = Math.hypot(vx, vy), d = pullFor(m);
-  const px = L.start.x - vx / m * d, py = L.start.y - vy / m * d;
-  let best = 0;
-  for (let r = 1; r <= 40; r++) {
-    for (let q = 0; q < 16; q++) {
-      const ang = q / 16 * TAU, qx = px + Math.cos(ang) * r, qy = py + Math.sin(ang) * r;
-      const dx = L.start.x - qx, dy = L.start.y - qy, dd = Math.hypot(dx, dy), mm = speedFor(dd);
-      if (sim(L, dx / dd * mm, dy / dd * mm, null) !== 1) return best;
-    }
-    best = r;
-  }
-  return best;
-}
-
-// Builds the puzzle. Picks the most forgiving route with at least minB bends, then drops big
-// ragged rock masses across every shortcut (a winning launch with fewer bends), keeping
-// them well clear of that route, until no shortcut is left.
-function segHitsRock(L) {
+// True if something solid sits on the straight segment from ship to portal.
+function segBlocked(L) {
   const ax = L.start.x, ay = L.start.y, bx = L.goal.x, by = L.goal.y, dx = bx - ax, dy = by - ay;
-  return L.rocks.some(q => {
+  return L.rocks.concat(L.planets).some(q => {
     const t = Math.max(0, Math.min(1, ((q.x - ax) * dx + (q.y - ay) * dy) / (dx * dx + dy * dy)));
     return Math.hypot(q.x - (ax + t * dx), q.y - (ay + t * dy)) < q.r + SHIP_R;
   });
 }
 
-// Shortcut launches (fewer bends than required) that a player could really hit: margin of 2+ px.
+// A big rock lump across the straight line from ship to portal, if nothing solid is there yet and the lump
+// can sit well clear of the designed route.
+function ensureBlocked(L, design) {
+  if (segBlocked(L)) return true;
+  const rnd = mulberry32((L.seed ^ 0x2545f491) >>> 0), R = (a, b) => a + (b - a) * rnd();
+  const rec = [];
+  sim(L, design.vx, design.vy, rec);
+  const dx = L.goal.x - L.start.x, dy = L.goal.y - L.start.y, dist = Math.hypot(dx, dy), nx = -dy / dist, ny = dx / dist;
+  const clear = (x, y) => { let m = 1e9; for (let i = 0; i < rec.length; i += 4) m = Math.min(m, Math.hypot(rec[i] - x, rec[i + 1] - y)); return m; };
+  for (let t = 0; t < 80; t++) {
+    const f = R(0.25, 0.75), off = R(-0.04, 0.04) * H, size = Math.min(R(110, 170), dist * 0.6);
+    const sh = rockShape(L.start.x + dx * f + nx * off, L.start.y + dy * f + ny * off, rnd, Math.floor(rnd() * 4), size, R(0, TAU));
+    const ok = sh.every(q => q.x > q.r + 6 && q.x < W - q.r - 6 && q.y > q.r + 6 && q.y < H - q.r - 6
+      && Math.hypot(q.x - L.start.x, q.y - L.start.y) > q.r + 56 && Math.hypot(q.x - L.goal.x, q.y - L.goal.y) > q.r + GOAL_R + 24
+      && clear(q.x, q.y) > q.r + 16 && L.planets.every(p => Math.hypot(p.x - q.x, p.y - q.y) > p.r + q.r + 12));
+    if (ok) { for (const q of sh) L.rocks.push(q); return segBlocked(L); }
+  }
+  return false;
+}
+
+// Shortcut launches (fewer bends than the intended route asks for) that a player could really hit.
 const FIND_TOL = 2;
 function findable(L, minB, wins) {
   const sc = wins.filter(w => w.b < minB);
   const st = Math.max(1, Math.floor(sc.length / 30)), out = [];
-  for (let i = 0; i < sc.length; i += st) if (toleranceOf(L, sc[i].vx, sc[i].vy) >= FIND_TOL) out.push(sc[i]);
+  for (let i = 0; i < sc.length; i += st) if (toleranceOf(L, sc[i].vx, sc[i].vy, FIND_TOL) >= FIND_TOL) out.push(sc[i]);
   return out;
 }
 
-function solveLevel(L, minB, force) {
-  if (!segHitsRock(L)) return null;             // the straight line must be physically blocked
+// Builds the puzzle. Picks the squiggliest route with a playable margin, then drops big ragged rock masses across
+// every shortcut (a winning launch with clearly fewer bends), keeping them clear of that route, until none is left.
+function solveLevel(L, slack, design) {
   const rnd = mulberry32((L.seed ^ 0x9e3779b9) >>> 0);
-  const wins = sweepWins(L, 2, 10);
-  const cands = wins.filter(w => w.b >= minB);
-  if (!cands.length) return null;
-  const stride = Math.max(1, Math.floor(cands.length / 60));
-  let route = null;
-  for (let i = 0; i < cands.length; i += stride) {
-    const c = cands[i], tol = toleranceOf(L, c.vx, c.vy);
-    if (!route || tol > route.tol) route = { vx: c.vx, vy: c.vy, bends: c.b, tol };
+  const wins = sweepWins(L, 1, 16);
+  if (design) {                                  // the designed launch and its neighbours, finely
+    const a0 = Math.atan2(design.vy, design.vx), v0 = Math.hypot(design.vx, design.vy);
+    for (let da = -1.5; da <= 1.5; da += 0.25) for (let dv = -0.03; dv <= 0.0301; dv += 0.01) {
+      const t = a0 + da * Math.PI / 180, v = v0 * (1 + dv), vx = Math.cos(t) * v, vy = Math.sin(t) * v, rec = [];
+      if (sim(L, vx, vy, rec) === 1) wins.push({ vx, vy, b: countBends(rec) });
+    }
   }
-  if (route.tol < TOL_MIN - 1 && !force) return null;
+  if (!wins.length) return null;
+  const bmax = wins.reduce((m, w) => Math.max(m, w.b), 0);
+  // best route: most bends first, then margin; test candidates from the squiggliest down
+  const order = wins.slice().sort((p, q) => q.b - p.b);
+  let route = null, tested = 0;
+  for (let i = 0; i < order.length && tested < 80; i += Math.max(1, Math.floor(order.length / 400))) {
+    const c = order[i];
+    if (route && c.b < route.bends - 1) break;
+    tested++;
+    const tol = toleranceOf(L, c.vx, c.vy);
+    if (tol < TOL_MIN) continue;
+    if (!route || c.b > route.bends || (c.b === route.bends && tol > route.tol)) route = { vx: c.vx, vy: c.vy, bends: c.b, tol };
+  }
+  if (!route) return { fail: true, bmax };
+  const minB = Math.max(1, route.bends - slack);
   const routeRec = [];
   sim(L, route.vx, route.vy, routeRec);
   const clearance = (x, y) => {
@@ -251,15 +374,15 @@ function solveLevel(L, minB, force) {
     for (let i = 0; i < routeRec.length; i += 6) m = Math.min(m, Math.hypot(routeRec[i] - x, routeRec[i + 1] - y));
     return m;
   };
-  const blobAt = (cx, cy, ang, scale) => rockShape(cx, cy, rnd, Math.floor(rnd() * 4), 84 * scale, ang);
-  const lobeOk = q => q.x > q.r && q.x < W - q.r && q.y > q.r && q.y < H - q.r
-    && clearance(q.x, q.y) > q.r + 18
-    && L.planets.every(p => Math.hypot(p.x - q.x, p.y - q.y) > p.r + q.r + 13)
-    && Math.hypot(q.x - L.start.x, q.y - L.start.y) > q.r + 87
+  const blobAt = (cx, cy, ang, scale) => rockShape(cx, cy, rnd, Math.floor(rnd() * 4), 110 * scale, ang);
+  const lobeOk = q => q.x > q.r + 4 && q.x < W - q.r - 4 && q.y > q.r + 4 && q.y < H - q.r - 4
+    && clearance(q.x, q.y) > q.r + 16
+    && L.planets.every(p => Math.hypot(p.x - q.x, p.y - q.y) > p.r + q.r + 12)
+    && Math.hypot(q.x - L.start.x, q.y - L.start.y) > q.r + 50
     && Math.hypot(q.x - L.goal.x, q.y - L.goal.y) > GOAL_R + q.r + 20;
   let stuck = false;
-  for (let it = 0; it < 26 && !stuck; it++) {
-    const sc = findable(L, minB, it === 0 ? wins : sweepWins(L, 2, 10));
+  for (let it = 0; it < 30 && !stuck; it++) {
+    const sc = findable(L, minB, it === 0 ? wins : sweepWins(L, 1, 16));
     if (!sc.length) break;
     const st = Math.max(1, Math.floor(sc.length / 40));
     const paths = [];
@@ -284,10 +407,10 @@ function solveLevel(L, minB, force) {
     const nPick = Math.min(10, paths.length);
     for (let k = 0; k < nPick; k++) {
       const rec = paths[Math.floor(k * paths.length / nPick)].rec, n = rec.length / 2;
-      for (let i = Math.max(2, Math.floor(n * 0.12)); i < Math.floor(n * 0.95); i += 6) {
+      for (let i = Math.max(2, Math.floor(n * 0.08)); i < Math.floor(n * 0.97); i += 6) {
         const hx = rec[2 * i + 2] - rec[2 * i - 2], hy = rec[2 * i + 3] - rec[2 * i - 1];
         const ang = Math.atan2(hy, hx) + Math.PI / 2 + (rnd() - 0.5) * 0.8;
-        for (const scale of [1.5, 1.15, 0.85]) {
+        for (const scale of [1.4, 1.1, 0.8, 0.6]) {
           const lobes = blobAt(rec[2 * i], rec[2 * i + 1], ang, scale);
           if (!lobes.every(lobeOk)) continue;
           const score = hits(lobes) * 100 + scale * 10;
@@ -298,12 +421,17 @@ function solveLevel(L, minB, force) {
     }
     if (bestBlob && bestScore >= 100) for (const q of bestBlob) L.rocks.push(q); else stuck = true;
   }
-  const finalWins = sweepWins(L, 1, 16);
+  const finalWins = sweepWins(L, 0.5, 24);
   const shortcuts = findable(L, minB, finalWins).length;
   route.tol = toleranceOf(L, route.vx, route.vy);
+  const rec2 = [];
+  const res = sim(L, route.vx, route.vy, rec2);
+  route.bends = countBends(rec2);
+  route.turn = Math.round(totalTurn(rec2));
   route.shortcuts = shortcuts;
   route.winners = finalWins.length;
-  route.strict = shortcuts === 0 && route.tol >= TOL_MIN;
+  route.strict = res === 1 && shortcuts === 0 && route.tol >= TOL_MIN;
+  route.bmax = bmax;
   return route;
 }
 
@@ -320,75 +448,44 @@ function scatterDust(L, sol) {
     return m;
   };
   const out = [];
-  for (let tries = 0; out.length < count && tries < 600; tries++) {
-    const x = W * (0.2 + 0.75 * rnd()), y = H * (0.08 + 0.84 * rnd());
-    if (routeClear(x, y) < 60) continue;
+  for (let tries = 0; out.length < count && tries < 900; tries++) {
+    const x = W * (0.05 + 0.9 * rnd()), y = H * (0.06 + 0.88 * rnd());
+    if (routeClear(x, y) < (tries > 500 ? 36 : 56)) continue;
     if (!L.planets.every(p => Math.hypot(p.x - x, p.y - y) > p.r + 27)) continue;
     if (!L.rocks.every(q => Math.hypot(q.x - x, q.y - y) > q.r + 20)) continue;
     if (Math.hypot(x - L.start.x, y - L.start.y) < 60) continue;
     if (Math.hypot(x - L.goal.x, y - L.goal.y) < GOAL_R + 40) continue;
+    if (inDial(x, y)) continue;
     if (!out.every(d => Math.hypot(d.x - x, d.y - y) > 93)) continue;
     out.push({ x, y, got: false, ph: rnd() * TAU });
   }
   return out;
 }
 
-function trivialSolution(L) {
-  const dx = L.goal.x - L.start.x, dy = L.goal.y - L.start.y, dd = Math.hypot(dx, dy) || 1;
-  for (let k = 3; k <= 10; k++) {
-    const sp = VMAX * k / 10, vx = dx / dd * sp, vy = dy / dd * sp;
-    if (sim(L, vx, vy, null) === 1) return { vx, vy, bends: 0, tol: 0, shortcuts: 0, winners: 1, strict: false };
-  }
-  return { vx: dx / dd * VMAX * 0.5, vy: dy / dd * VMAX * 0.5, bends: 0, tol: 0, shortcuts: 0, winners: 0, strict: false };
-}
-
-// Builds the level for orbit n with P0 planets. This is the browser build's search, unchanged: the
-// fewest-planet fallbacks, widest-shot-first relaxation and last resort are the same. It runs offline in
-// tools/slingshot_levels.js and its results ship in levels.js, so the page never runs this search.
-function buildLevel(n, P0) {
+// Builds orbit n's level with P planets: tries many layouts and keeps the strict one with the most bends in its
+// correct route. It runs offline in tools/slingshot_levels.js and its results ship in levels.js, so the page never
+// runs this search.
+function buildLevel(n, P, opts) {
+  const o = Object.assign({ seeds: 45, slack: 0, tolMin: 3 }, opts || {});
+  TOL_MIN = o.tolMin;
   let best = null, tries = 0;
-  const attempt = (P, seeds, minB) => {
-    const B = wallsFor(P);
-    let found = null;
-    for (let a = 0; a < seeds && !(found && found.sol.strict); a++) {
-      tries++;
-      const L = genLevel(n, ((n * 104729) + P * 7907 + a * 7919) >>> 0, P, B);
-      if (L.planets.length < P) { if (a >= 2) break; continue; }
-      if (!segHitsRock(L) || !sweepWins(L, 3, 8).some(w => w.b >= minB)) continue;   // cheap pre-filter
-      const sol = solveLevel(L, minB, false);
-      if (!sol) continue;
-      const score = (sol.strict ? 5000 : 0) + (sol.shortcuts === 0 ? 1000 : 0) + sol.tol;
-      if (!found || score > found.score) found = { L, sol, score, minB, B };
-    }
-    return found;
-  };
   try {
-    for (const need of [6, 4, 3]) {              // widest shot first; relax before dropping any planets
-      TOL_MIN = need;
-      const f = attempt(P0, need === 6 ? 40 : 70, minBendsFor(P0));
-      if (f && f.sol.strict) { best = f; break; }
-    }
-    TOL_MIN = 3;
-    for (let P = P0 - 1; P >= 1 && !best; P--) {
-      const f = attempt(P, 20, minBendsFor(P));
-      if (f && f.sol.strict) best = f;
-    }
-    for (let P = P0; P >= 1 && !best; P--) {   // relaxed: fewer bends required
-      const f = attempt(P, 10, 1);
-      if (f) best = f;
-    }
-    for (let a = 0; !best && a < 8; a++) {      // accept any winning route, however narrow
+    for (let a = 0; a < o.seeds; a++) {
       tries++;
-      const L = genLevel(n, ((n * 104729) + a * 31) >>> 0, Math.min(P0, 4), 1);
-      const sol = solveLevel(L, 0, true);
-      if (sol) best = { L, sol, score: 0, minB: 0, B: 1 };
+      const g = genLevel(n, ((n * 104729) + P * 7907 + a * 7919) >>> 0, P);
+      if (!g) continue;
+      const L = g.L;
+      const drec = [];
+      sim(L, g.design.vx, g.design.vy, drec);
+      if (best && best.sol.strict && countBends(drec) < best.sol.bends) continue;   // cannot beat the best snake so far
+      if (!ensureBlocked(L, g.design)) continue;
+      const sol = solveLevel(L, o.slack, g.design);
+      if (!sol || sol.fail) continue;
+      const score = (sol.strict ? 10000 : 0) + sol.bends * 100 + Math.min(sol.turn / 10, 60) + Math.min(sol.tol, 20);
+      if (!best || score > best.score) best = { L, sol, score };
     }
-  } catch (e) { best = null; }
-  if (!best) {                                  // last resort so the level always exists
-    const L = genLevel(n, (n * 104729) >>> 0, 0, 0);
-    best = { L, sol: trivialSolution(L), minB: 0, B: 0 };
-  }
-  TOL_MIN = 6;
+  } finally { TOL_MIN = 6; }
+  if (!best) return null;
   best.L.dust = scatterDust(best.L, best.sol);
-  return { L: best.L, sol: best.sol, gen: { tries, minB: best.minB, P: best.L.planets.length, B: best.B } };
+  return { L: best.L, sol: best.sol, gen: { tries, P: best.L.planets.length } };
 }
