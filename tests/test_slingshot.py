@@ -206,9 +206,10 @@ class SlingshotTests(unittest.TestCase):
         self.aim_at(0.3, 0.5)
         self.assertFalse(self.status()["preview"])
 
-    def test_blind_crash_costs_hp_and_relaunches_from_the_start(self):
+    def test_blind_crash_costs_hp_and_relaunches_from_where_it_crashed(self):
         self.start_blind()
-        sx, sy = self.levels["1:1"]["start"]
+        lv = self.levels["1:1"]
+        sx, sy = lv["start"]
         self.aim_at(math.pi if sx > 320 else 0.0, 0.9)                        # straight at the nearer wall, full power
         self.press("r1", 2)
         for _ in range(60 * 14):
@@ -219,8 +220,29 @@ class SlingshotTests(unittest.TestCase):
         self.step(90)
         status = self.status()
         self.assertEqual((status["state"], status["orbit"], status["hp"], status["menu"]), ("idle", 1, 19, False))
-        self.assertAlmostEqual(status["x"], sx, places=1)                     # launches again from the same spot
-        self.assertAlmostEqual(status["y"], sy, places=1)
+        self.assertGreater(math.hypot(status["x"] - sx, status["y"] - sy), 20)   # not back at the start
+        self.assertTrue(0 < status["x"] < 640 and 0 < status["y"] < 480)
+        for px, py, pr, *_ in lv["planets"]:
+            self.assertGreater(math.hypot(status["x"] - px, status["y"] - py), pr + 4)   # and not inside a planet
+        self.aim_at(math.atan2(240 - status["y"], 320 - status["x"]), 0.3)
+        self.press("r1", 2)
+        self.assertEqual(self.status()["state"], "flying")                    # it can launch again from there
+
+    def test_crashing_into_a_planet_respawns_just_outside_it(self):
+        self.start_blind()
+        lv = self.levels["1:1"]
+        (sx, sy), (px, py, pr, *_) = lv["start"], lv["planets"][0]
+        self.aim_at(math.atan2(py - sy, px - sx), 0.5)                        # straight at the planet
+        self.press("r1", 2)
+        for _ in range(60 * 14):
+            self.step(1)
+            if self.status()["state"] == "dead":
+                break
+        self.step(90)
+        status = self.status()
+        self.assertEqual((status["state"], status["hp"]), ("idle", 19))
+        gap = math.hypot(status["x"] - px, status["y"] - py) - pr
+        self.assertTrue(4 < gap < 20, gap)                                    # beside the planet, not inside it
 
     def test_zero_hp_is_game_over_and_try_again_restarts(self):
         self.start_blind()

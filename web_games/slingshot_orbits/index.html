@@ -264,7 +264,8 @@ function levelFor(n) {
 
 // ---------- orbit state ----------
 function resetShip() {
-  S.ship.x = S.L.start.x; S.ship.y = S.L.start.y;
+  const at = mode === 'blind' && S.rest ? S.rest : S.L.start;      // Blind Crash relaunches from where the ship came down
+  S.ship.x = at.x; S.ship.y = at.y;
   S.ship.vx = 0; S.ship.vy = 0;
   S.state = 'idle'; S.trail = []; S.heading = aimAng;
 }
@@ -294,6 +295,7 @@ function launch(vx, vy) {
 
 function physicsStep() {
   const sh = S.ship, L = S.L, gp = L.gp, n = gp.length;
+  const px = sh.x, py = sh.y;                              // the last position before this step: clear of every obstacle
   let ax = 0, ay = 0;
   for (let i = 0; i < n; i += 3) {
     const dx = gp[i] - sh.x, dy = gp[i + 1] - sh.y;
@@ -326,16 +328,17 @@ function physicsStep() {
   }
   if (L.grid[Math.floor(sh.y / GRID) * GW + Math.floor(sh.x / GRID)]) {
     for (const p of L.planets) {
-      if ((sh.x - p.x) ** 2 + (sh.y - p.y) ** 2 < (p.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false); return; }
+      if ((sh.x - p.x) ** 2 + (sh.y - p.y) ** 2 < (p.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false, null, px, py); return; }
     }
     for (const r of L.rocks) {
-      if ((sh.x - r.x) ** 2 + (sh.y - r.y) ** 2 < (r.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false); return; }
+      if ((sh.x - r.x) ** 2 + (sh.y - r.y) ** 2 < (r.r + SHIP_R) ** 2) { crash(sh.x, sh.y, false, null, px, py); return; }
     }
   }
 }
 
-function crash(x, y, silent, msg) {
+function crash(x, y, silent, msg, rx, ry) {
   S.state = 'dead'; S.deadT = 1.1;
+  S.rest = { x: rx === undefined ? x : rx, y: ry === undefined ? y : ry };   // where Blind Crash puts the ship back
   if (mode === 'blind') hp = Math.max(0, hp - 1);
   const tag = mode === 'blind' ? '  HP ' + hp : '';
   if (!silent) {
@@ -430,7 +433,7 @@ function updatePreview() {
   const key = Math.round(v.vx * 4) + ',' + Math.round(v.vy * 4);
   if (key !== previewKey || !pv) {
     previewKey = key;
-    pv = { x: S.L.start.x, y: S.L.start.y, vx: v.vx, vy: v.vy, s: 0, rec: [S.L.start.x, S.L.start.y], res: 0, done: false };
+    pv = { x: S.ship.x, y: S.ship.y, vx: v.vx, vy: v.vy, s: 0, rec: [S.ship.x, S.ship.y], res: 0, done: false };
   }
   if (pv.done) return;
   const L = S.L, gp = L.gp, n = gp.length, grid = L.grid, SS = SOFT * SOFT;
