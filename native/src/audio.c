@@ -54,6 +54,8 @@ struct Audio {
     atomic_int quit;
     Host *host;
     const char *root;
+    unsigned underruns, logged;   /* music ring ran dry (audio thread counts, main thread reports) */
+    int polls;
 };
 
 static Audio *g_audio = NULL;
@@ -79,7 +81,7 @@ static void mix_cb(void *user, Uint8 *out, int len) {
         if (v->stream) {
             size_t rd = atomic_load(&v->rd), wr = atomic_load(&v->wr);
             for (int f = 0; f < frames; f++) {
-                if (rd == wr) { if (v->eof) { v->done = 1; } break; }
+                if (rd == wr) { if (v->eof) v->done = 1; else a->underruns++; break; }
                 const int16_t *p = v->ring + (rd % RING_FRAMES) * 2;
                 acc[f * 2] += p[0] * gain / 256; acc[f * 2 + 1] += p[1] * gain / 256;
                 rd++;
@@ -117,16 +119,19 @@ static int decode_thread(void *arg) {
             int want_out = 2048;
             int want_in = (int)(want_out * step) + 2;
             if (want_in > 4096 * 2) want_in = 4096 * 2;
-            int got = stb_vorbis_get_samples_short_interleaved(v->vb, v->ch, tmp, want_in * v->ch);
+            int cf = v->have_carry ? 1 : 0;                              /* last frame of the previous chunk, so interpolation never skips across the seam */
+            if (cf) memcpy(tmp, v->carry, sizeof(short) * (size_t)v->ch);
+            int got = stb_vorbis_get_samples_short_interleaved(v->vb, v->ch, tmp + cf * v->ch, want_in * v->ch);
             if (got <= 0) {
                 if (v->loop) { stb_vorbis_seek_start(v->vb); v->frac = 0; v->have_carry = 0; }
                 else v->eof = 1;
                 atomic_store(&v->busy, 0);
                 continue;
             }
-            /* linear resample to RATE */
+            int n = got + cf;
+            /* linear resample to RATE; position 0 is the carried frame */
             double pos = v->frac;
-            while (pos + 1 < got && RING_FRAMES - (wr - rd) > 1) {
+            while (pos + 1 < n && RING_FRAMES - (wr - rd) > 1) {
                 int i0 = (int)pos;
                 double t = pos - i0;
                 int16_t l0, r0, l1, r1;
@@ -138,7 +143,9 @@ static int decode_thread(void *arg) {
                 wr++;
                 pos += step;
             }
-            v->frac = pos - got;
+            memcpy(v->carry, tmp + (size_t)(n - 1) * v->ch, sizeof(short) * (size_t)v->ch);
+            v->have_carry = 1;
+            v->frac = pos - (n - 1);
             if (v->frac < 0) v->frac = 0;
             atomic_store(&v->wr, wr);
             atomic_store(&v->busy, 0);
@@ -242,6 +249,7 @@ static int audio_init(Audio *a) {
     a->dev = sdl.OpenAudioDevice(NULL, 0, &want, &have, 0);
     if (!a->dev) { sg_log("warn", "audio unavailable, running silent: %s", sdl.GetError()); return 0; }
     sdl.PauseAudioDevice(a->dev, 0);
+    sg_log("info", "audio on: %d Hz, %d ch, %d samples per buffer", have.freq, have.channels, have.samples);
 #ifdef _WIN32       /* SDL on Windows wants the caller's thread start functions */
     a->thread = sdl.CreateThread(decode_thread, "sgba-audio", a, (pfnSDL_CurrentBeginThread)_beginthreadex, (pfnSDL_CurrentEndThread)_endthreadex);
 #else
@@ -320,6 +328,7 @@ NATIVE(n_audio_cmd) {
                         for (int k = 0; k < MAXV; k++) if (a->voices[k].active && a->voices[k].stream) stop_voice(a, &a->voices[k]);   /* one music track at a time */
                         v->vb = vb; v->srate = (int)info.sample_rate; v->ch = info.channels > 1 ? 2 : 1; v->stream = 1;
                         v->ring = calloc(RING_FRAMES, 4);
+                        sg_log("info", "music start: %s (%d Hz, %d ch, loop %d)", b->path, v->srate, v->ch, loop);
                         atomic_store(&v->rd, 0); atomic_store(&v->wr, 0);
                         sdl.LockAudioDevice(a->dev); v->active = 1; sdl.UnlockAudioDevice(a->dev);
                     }
@@ -349,6 +358,7 @@ NATIVE(n_audio_busy) {
 void audio_update(Natives *n) {
     Audio *a = n->audio;
     if (!a || a->ready <= 0) return;
+    if (++a->polls % 120 == 0 && a->underruns != a->logged) { sg_log("warn", "music underrun: %u buffers ran dry so far", a->underruns); a->logged = a->underruns; }
     for (int i = 0; i < MAXV; i++) {
         Voice *v = &a->voices[i];
         if (v->active && v->done && !v->loop) stop_voice(a, v);
@@ -373,6 +383,7 @@ void audio_shutdown(Natives *n) {
         atomic_store(&a->quit, 1);
         if (a->thread) sdl.WaitThread(a->thread, NULL);
         sdl.CloseAudioDevice(a->dev);
+        if (a->underruns) sg_log("warn", "music underruns this session: %u", a->underruns);
     }
     for (int i = 0; i < MAXV; i++) clear_voice(&a->voices[i]);
     for (int i = 0; i < a->nsfx; i++) { free(a->sfx[i]->pcm); free(a->sfx[i]->path); free(a->sfx[i]); }

@@ -90,6 +90,11 @@ Build a small, predictable, device-agnostic Python/Pygame virtual console for AI
 - No R36S deployment or performance test has occurred. Firmware, architecture, Python/SDL availability, and physical controller mapping remain unknown.
 - Fixed-step simulation and resource limits cannot guarantee 60 FPS if game work exceeds the device's frame budget.
 
+### Device report review (2026-10-15)
+- Reports from the R36S (build 8070abc): the crash is `text_shutdown` at exit (text.c:146, symbolized with an unstripped build of the same commit), the double free already fixed in 0e5c169. The device needs a build at or after 0e5c169.
+- Music: Parry Perry's streams are 32 kHz mono, resampled to 22.05 kHz. The resampler dropped the fractional position at each 2048-frame chunk seam (a click about every 93 ms). Fixed with a carried frame; `native/tests/audio_test.sh` measures it (old 168 vs limit 106, new 75). Audio now logs device open, music start and underruns. Slingshot Orbits has no audio code or assets.
+- Sticks: Slingshot reads axes 0-3 of the standard pad; `native/tests/stick_test.sh` covers that. Device axis numbering is still unconfirmed: the report log line "axis N first moved" will show it. Use `"axes"` in controls.json to remap.
+
 ## Queue
 
 ### P7: `.sgba` game package format

@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>audio test</title></head>
+<body><canvas id="c" width="640" height="480"></canvas>
+<script>
+const ctx = document.getElementById('c').getContext('2d');
+const a = new Audio('tone.ogg');
+a.loop = true;
+a.play();
+function frame() { ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 640, 480); requestAnimationFrame(frame); }
+requestAnimationFrame(frame);
+</script></body></html>

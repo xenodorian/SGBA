@@ -32,6 +32,10 @@ jobs:
         run: native/tests/memory_test.sh
       - name: Diagnostics (session lines, crash and unclean-exit reports)
         run: native/tests/reports_test.sh
+      - name: Slingshot Orbits sticks (axes 0-3 drive aim and power)
+        run: native/tests/stick_test.sh
+      - name: Music (32 kHz mono stream is click-free)
+        run: native/tests/audio_test.sh
       - name: Build the R36S binary (glibc 2.17)
         run: |
           make -C native TARGET=aarch64
