@@ -483,7 +483,19 @@ function setPlanets(v) {
   syncMenu();
 }
 
+// ---------- music ----------
+// The browser version synthesised this with oscillators, which SGBA cannot play. assets/slingshot_music.ogg is the same
+// recipe rendered offline (tools/render_slingshot_music.py), a 67 s seamless loop.
+let music = null;
+function startMusic() {
+  try {
+    if (!music) { music = new Audio('assets/slingshot_music.ogg'); music.loop = true; music.volume = 0.7; }
+    if (music.paused) { const p = music.play(); if (p && p.catch) p.catch(() => {}); }   // a browser may refuse before a gesture; startGame tries again
+  } catch (e) {}
+}
+
 function startGame() {
+  startMusic();
   try { localStorage.setItem('slingshot-start', String(startPlanets)); } catch (e) {}
   total = 0;
   closeMenu();
@@ -720,6 +732,7 @@ window.slingshotStatus = () => S ? {
 
 makeStars();
 bakeBackground();
+startMusic();
 requestAnimationFrame(frame);
 })();
 </script>

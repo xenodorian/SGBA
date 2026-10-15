@@ -1,6 +1,6 @@
 # Current Work Queue
 
-Last updated: 2026-10-14
+Last updated: 2026-10-15
 Repository: xenodorian/SGBA
 Latest verified runtime/package code: 86ac857780da89a177479574a200e79c4961209a
 
@@ -33,7 +33,7 @@ Tests: `tests/test_slingshot.py` (5 tests: levels shipped, menu start, dial cloc
 Verified in the headless host: menu to launch, aim and dial, R1 flight, crash, and the stored winning launches for orbits 1 to 3 through the real controls (score 1000, 2000, 3000 with two shots left). Frame cost on this PC (QuickJS, headless, update plus draw): median about 5 ms while aiming and in flight on a 5-planet level (p95 about 6.5 ms), with the aim preview recalculated every 4 frames. Not measured on any handheld, and a handheld CPU is likely several times slower, so this is the first thing to measure on the device.
 Decisions to confirm with the owner:
 - Left stick direction: the stick is the pull point, so the launch goes the opposite way (as the mouse drag did). Flip the sign in `index.html` `applyAim()` if the owner wants the ship to follow the stick.
-- Audio: the original's synthesized sounds were dropped because SGBA's JS host renders Web Audio as silence.
+- Audio: the original's synthesized sounds were dropped because SGBA's JS host renders Web Audio as silence. The music was restored on 2026-10-15 (see "Slingshot music" below); the sound effects (launch, dust, boom, win) are still not in the port.
 - Difficulty: the mouse tolerance (pointer pixels) that the level search used is kept, but a stick's precision is different, so playtesting may show levels are harder or easier than the browser build.
 Not done: no handheld test; the R36S axis numbering is unverified (the default map uses axes 0 to 3, the same as the runtime's default).
 
@@ -92,7 +92,7 @@ Build a small, predictable, device-agnostic Python/Pygame virtual console for AI
 
 ### Device report review (2026-10-15)
 - Reports from the R36S (build 8070abc): the crash is `text_shutdown` at exit (text.c:146, symbolized with an unstripped build of the same commit), the double free already fixed in 0e5c169. The device needs a build at or after 0e5c169.
-- Music: Parry Perry's streams are 32 kHz mono, resampled to 22.05 kHz. The resampler dropped the fractional position at each 2048-frame chunk seam (a click about every 93 ms). Fixed with a carried frame; `native/tests/audio_test.sh` measures it (old 168 vs limit 106, new 75). Audio now logs device open, music start and underruns. Slingshot Orbits has no audio code or assets.
+- Music: Parry Perry's streams are 32 kHz mono, resampled to 22.05 kHz. The resampler dropped the fractional position at each 2048-frame chunk seam (a click about every 93 ms). Fixed with a carried frame; `native/tests/audio_test.sh` measures it (old 168 vs limit 106, new 75). Audio now logs device open, music start and underruns. (Superseded for Slingshot: it now has music, see "Slingshot music".)
 - Sticks: Slingshot reads axes 0-3 of the standard pad; `native/tests/stick_test.sh` covers that. Device axis numbering is still unconfirmed: the report log line "axis N first moved" will show it. Use `"axes"` in controls.json to remap.
 
 ## Queue
@@ -261,3 +261,10 @@ Evidence: the first uploaded reports (xenodorian/GitROMs issues #1 to #3) showed
 - **Analog sticks restored** (the earlier revert was a mistake: the crash was the text cache double free). Left stick aims, right stick is the power dial, d-pad as backup. The log now says how many axes the pad has and which axis moved first, so a report shows the real numbering. Axis map override: `"axes": {"lx":0,"ly":1,"rx":2,"ry":3}` in controls.json.
 - **Launcher retry:** SGBA.sh retried the program whenever it exited non-zero within 20 s, so a crash on exit started the game or menu again. It now retries (with the bundled SDL) only for exit codes 1, 126 and 127, which mean it could not start.
 - Checks: output identical (final frame, seeded) with read-ahead and canvas release on or off on Parry Perry, Slingshot, demo and input lab; aarch64 under qemu identical to x86; ThreadSanitizer (no reports) and AddressSanitizer (no errors) on Parry Perry with the worker; `native/tests/memory_test.sh`. Not measured on the device.
+
+## Slingshot music (owner request, 2026-10-15: "the music still doesn't play")
+- Cause: the port never had music. The browser game made its ambient music live with Web Audio oscillators (a 55 Hz drone plus random pentatonic notes), SGBA's JS host plays oscillators as silence, so the port dropped it in 9f2d84c and nothing replaced it. The analog stick work (42c7c90) and the Parry Perry music fix (3b493a3) did not touch it.
+- Fix: `tools/render_slingshot_music.py` reproduces the original recipe offline (same drone, scale, note length, glide, envelope, 0.6 master gain) with a seeded random pick over 120 ticks, 67.2 s, notes wrapping round the end so it loops with no seam, and writes Ogg Vorbis: `web_games/slingshot_orbits/assets/slingshot_music.ogg` (22.05 kHz mono, about 108 KB, kept above the 96 KB the native player needs to stream it). The result is peak-normalised to 0.55; the original levels peaked near -20 dBFS and would be too quiet on a handheld speaker. `index.html` plays it with `new Audio(...)`, looped at volume 0.7, started at load and again when Launch is pressed (a browser needs a gesture first).
+- Verified on this PC: native runtime run of the packaged game with SDL's disk audio driver logged `audio on` and `music start ... loop 1`, no underruns, no JS errors, and the captured output has the drone and the notes (peak 0.38). Full test suite passes (88). Not verified: playback on the R36S itself, and how it sounds there.
+- `games/slingshot_orbits.sgba` was rebuilt from `web_games/slingshot_orbits/`. The previous committed package was stale: it still had the old d-pad mapping (up/down aim, left/right power) that 3b95703 swapped, so this rebuild also brings that swap into the package.
+- Not done: the four sound effects (launch, dust pickup, crash noise, win chime) from the browser game. They are short synthesized sounds, so they would be rendered to small Ogg or WAV files the same way.
