@@ -33,6 +33,9 @@
 #define SESSIONS_MAX 49152
 
 static char g_appdir[2100], g_dir[2200], g_marker[2300], g_sessions[2300];
+static char g_logs[2300], g_glog[2400];   /* <app>/logs and the current game's own log file (prebuilt for the crash handler) */
+static char g_last_ts[32];                /* wall time of the last status update, for the crash line */
+#define GAMELOG_MAX 131072
 static char g_ring[RING][200];
 static unsigned g_ring_total;
 static char g_boot[BOOT][200];
@@ -55,6 +58,9 @@ static struct {
     double fps10;
 } S;
 
+static void glog_to(const char *path, const char *fmt, ...);
+static void game_log_path(char *out, size_t n, const char *game);
+
 static void ts(char *o, size_t n, time_t t, int file) {
     struct tm tmv;
 #ifdef _WIN32
@@ -76,6 +82,7 @@ void report_log_line(const char *level, const char *msg) {
     memcpy(g_ring[g_ring_total % RING], line, sizeof line);
     g_ring_total++;
     if (!strcmp(level, "error")) { g_errors_seen++; g_errors_session++; }
+    if (S.on && g_glog[0] && (!strcmp(level, "error") || !strcmp(level, "warn"))) glog_to(g_glog, "%s: %s", level, msg);
 }
 
 /* ---- small system probes, all optional ---- */
@@ -213,12 +220,12 @@ static void marker_write(void) {
     fclose(f);
 }
 
-static void sessions_append(const char *line) {
+static void append_rotating(const char *path, long max, const char *line) {
     struct stat sb;
-    if (stat(g_sessions, &sb) == 0 && sb.st_size > SESSIONS_MAX) {                 /* keep the newest half */
-        FILE *f = fopen(g_sessions, "rb");
+    if (stat(path, &sb) == 0 && sb.st_size > max) {                 /* keep the newest half */
+        FILE *f = fopen(path, "rb");
         if (f) {
-            long keep = SESSIONS_MAX / 2;
+            long keep = max / 2;
             char *buf = malloc((size_t)keep + 1);
             if (buf) {
                 fseek(f, -keep, SEEK_END);
@@ -226,15 +233,44 @@ static void sessions_append(const char *line) {
                 buf[n] = 0;
                 char *nl = strchr(buf, '\n');
                 fclose(f);
-                f = fopen(g_sessions, "wb");
+                f = fopen(path, "wb");
                 if (f && nl) { fputs(nl + 1, f); fclose(f); f = NULL; }
                 free(buf);
             }
             if (f) fclose(f);
         }
     }
-    FILE *f = fopen(g_sessions, "a");
+    FILE *f = fopen(path, "a");
     if (f) { fputs(line, f); fputc('\n', f); fclose(f); }
+}
+
+static void sessions_append(const char *line) { append_rotating(g_sessions, SESSIONS_MAX, line); }
+
+/* one log per game, <app>/logs/<game>.log: every line starts with its date and time, so a reader can tell a recent problem from an old one */
+static void game_log_path(char *out, size_t n, const char *game) {
+    const char *base = strrchr(game, '/');
+    base = base ? base + 1 : game;
+    char name[120];
+    size_t k = 0;
+    for (const char *c = base; *c && k < sizeof name - 1; c++) {
+        if (*c == '.' && !strcmp(c, ".sgba")) break;
+        name[k++] = (char)(((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '-' || *c == '_') ? *c : '_');
+    }
+    name[k] = 0;
+    snprintf(out, n, "%s/%s.log", g_logs, k ? name : "game");
+}
+
+static void glog_to(const char *path, const char *fmt, ...) {
+    if (!path[0]) return;
+    char text[600], when[32], line[700];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(text, sizeof text, fmt, ap);
+    va_end(ap);
+    ts(when, sizeof when, time(NULL), 0);
+    snprintf(line, sizeof line, "%s %s", when, text);
+    for (char *c = line; *c; c++) if (*c == '\n' || *c == '\r') *c = ' ';
+    append_rotating(path, GAMELOG_MAX, line);
 }
 
 #ifndef _WIN32
@@ -264,6 +300,7 @@ static void on_crash(int sig, siginfo_t *si, void *uc) {
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd >= 0) {
         w(fd, "SGBA report: crash\n"); w(fd, g_hdr);
+        w(fd, "crash time (epoch seconds): "); wnum(fd, (unsigned long)time(NULL), 10); w(fd, "\n");
         w(fd, "signal: "); wnum(fd, (unsigned long)sig, 10);
         w(fd, sig == SIGSEGV ? " (segmentation fault)" : sig == SIGBUS ? " (bus error)" : sig == SIGILL ? " (illegal instruction)" : sig == SIGFPE ? " (arithmetic error)" : sig == SIGABRT ? " (abort)" : "");
         w(fd, "\nfault address: 0x"); wnum(fd, (unsigned long)(si ? si->si_addr : 0), 16);
@@ -276,6 +313,13 @@ static void on_crash(int sig, siginfo_t *si, void *uc) {
         unsigned first = g_ring_total > RING ? g_ring_total - RING : 0;
         for (unsigned k = first; k < g_ring_total; k++) { w(fd, g_ring[k % RING]); w(fd, "\n"); }
         close(fd);
+    }
+    if (g_glog[0]) {                                                  /* the game's own log gets a line too */
+        int gf = open(g_glog, O_WRONLY | O_APPEND);
+        if (gf >= 0) {
+            w(gf, "CRASH at epoch "); wnum(gf, (unsigned long)time(NULL), 10); w(gf, " (status last updated "); w(gf, g_last_ts); w(gf, "), signal "); wnum(gf, (unsigned long)sig, 10); w(gf, ", report "); w(gf, path + 0); w(gf, "\n");
+            close(gf);
+        }
     }
     unlink(g_marker);
     (void)uc;
@@ -306,6 +350,7 @@ static void build_header(void) {
     ts(when, sizeof when, time(NULL), 0);
     char st[300];
     stats_text(st, sizeof st);
+    snprintf(g_last_ts, sizeof g_last_ts, "%s", when);
     snprintf(g_hdr, sizeof g_hdr, "build: %s\ngame: %s\nlast status: %s\n(state at last update, %s)\n", SGBA_BUILD, S.game, st, when);
 }
 
@@ -315,6 +360,8 @@ void report_init(const char *app_dir) {
     mkdir_(g_dir);
     snprintf(g_marker, sizeof g_marker, "%s/.running", g_dir);
     snprintf(g_sessions, sizeof g_sessions, "%s/sessions.log", g_dir);
+    snprintf(g_logs, sizeof g_logs, "%s/logs", app_dir);
+    mkdir_(g_logs);
     char sentdir[2300];
     snprintf(sentdir, sizeof sentdir, "%s/sent", g_dir);
     mkdir_(sentdir);
@@ -325,6 +372,14 @@ void report_init(const char *app_dir) {
         size_t got = fread(note + l, 1, sizeof note - l - 1, m);
         note[l + got] = 0;
         fclose(m);
+        char *gp = strstr(note, "game=");                          /* which game was running: its own log records it too */
+        if (gp) {
+            char gname[160], lp[2400];
+            size_t gk = 0;
+            for (gp += 5; *gp && *gp != '\n' && gk < sizeof gname - 1; gp++) gname[gk++] = *gp;
+            gname[gk] = 0;
+            if (gk) { game_log_path(lp, sizeof lp, gname); glog_to(lp, "the previous session did not end cleanly (killed, power loss, hang or a crash before the handler ran)"); }
+        }
         write_report("unclean", note, 1);
     }
 #ifndef _WIN32
@@ -346,8 +401,15 @@ void report_session_begin(const char *game, double step_ms) {
     S.step_ms = step_ms > 1 ? step_ms : 16.7;
     g_booting = 0;
     g_errors_session = 0;
+    game_log_path(g_glog, sizeof g_glog, game);
+    {
+        struct stat gs;
+        long long gsz = stat(game, &gs) == 0 ? (long long)gs.st_size : -1;
+        glog_to(g_glog, "session start: build %s, game file %s (%lld bytes), step %.1f ms", SGBA_BUILD, S.game, gsz, S.step_ms);
+    }
     marker_write();
     build_header();
+    if (getenv("SGBA_TEST_CRASH_IN_SESSION")) { volatile int *p = NULL; *p = 1; }   /* test hook */
 }
 
 void report_frame(double loop_ms) {
@@ -365,6 +427,13 @@ void report_tick(int rss, int js_errors) {
     S.js_errors = js_errors;
     double secs = difftime(time(NULL), S.t0);
     S.fps10 = secs > 0 ? (double)S.loops / secs : 0;
+    static time_t last_glog;
+    if (time(NULL) - last_glog >= 60) {                                 /* a heartbeat, so a log that stops shows when the game stopped */
+        char st[300];
+        stats_text(st, sizeof st);
+        glog_to(g_glog, "status: %s fps=%.1f", st, S.fps10);
+        last_glog = time(NULL);
+    }
     marker_write();
     build_header();
 }
@@ -377,8 +446,10 @@ void report_session_end(const char *how) {
     double secs = difftime(time(NULL), S.t0);
     snprintf(line, sizeof line, "%s game=%s %s fps=%.1f build=%s end=%s", when, S.game, st, secs > 0 ? (double)S.loops / secs : 0.0, SGBA_BUILD, how);
     sessions_append(line);
+    glog_to(g_glog, "session end (%s): %s fps=%.1f", how, st, secs > 0 ? (double)S.loops / secs : 0.0);
     if (g_errors_session > 0) write_report("errors", "the game logged errors during this session (see the log below)", 0);
     S.on = 0;
+    g_glog[0] = 0;
     marker_write();
 }
 

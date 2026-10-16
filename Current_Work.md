@@ -302,3 +302,9 @@ Evidence: the first uploaded reports (xenodorian/GitROMs issues #1 to #3) showed
 ### Real Quit, and orbit-clear healing (owner requests, 2026-10-15)
 - Quit now really quits. New engine hook: a page calling `window.close()` leaves the game exactly like Quit in the pause menu (native: `__sgba_quit` sets `quit_req`, `run_loop` returns `END_LEAVE`, the caller treats it as the pause menu's quit: a direct launch exits, a launcher launch returns to the launcher). The shim defines `window.close` to call it when it exists. Slingshot's pause menu button is now "Quit game" and calls `window.close()`; a runtime that ignores it (the Python host has no hook) falls back to the title screen after 0.6 s. Test: `native/tests/quit_test.sh` (also in the native CI workflow). Not verified on the R36S.
 - Blind Crash Easy and Medium: clearing an orbit mends 1 HP (capped at 20); Hard does not. The Clear message shows the new HP. 107 tests pass.
+
+## Logs with dates, per-game logs, launcher guards (2026-10-16)
+- Every log line carries a date and time: sgba.log (already), stderr lines (sgba_launch.log, new), reports (a crash report has the crash epoch, unclean and error reports have times), sessions.log, and the new per-game logs.
+- `sgba/logs/<game>.log`: one file per game, rotated at 128 KB. It records session start (build, game file size), a status line every 60 s, warnings and errors, session end, an unclean previous session, and a CRASH line with the epoch (written from the crash handler). GitROMs' status report includes their tails.
+- Launchers: `SGBA.sh` refuses an empty or non-ELF `sgba` and says so on screen and in `sgba_launch.log`; each game launcher refuses a missing or empty `.sgba`. Tests: `native/tests/gamelog_test.sh`, `launcher_guard_test.sh`.
+- GBA ROM games run in ArkOS's own emulator, which these logs cannot see; GitROMs includes the tail of `/dev/shm/runcommand.log` in its status report when that file exists (unverified on the device).

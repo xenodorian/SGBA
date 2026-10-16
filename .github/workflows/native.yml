@@ -34,6 +34,10 @@ jobs:
         run: native/tests/memory_test.sh
       - name: Diagnostics (session lines, crash and unclean-exit reports)
         run: native/tests/reports_test.sh
+      - name: Per-game logs (timestamps, session start and end, crashes, unclean exits)
+        run: native/tests/gamelog_test.sh
+      - name: Launchers refuse an empty or damaged program or game
+        run: native/tests/launcher_guard_test.sh
       - name: Slingshot Orbits sticks (axes 0-3 drive aim and power)
         run: native/tests/stick_test.sh
       - name: Music (32 kHz mono stream is click-free)

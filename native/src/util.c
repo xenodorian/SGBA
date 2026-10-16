@@ -32,7 +32,7 @@ void sg_log(const char *level, const char *fmt, ...) {
     char ts[32];
     strftime(ts, sizeof ts, "%Y-%m-%d %H:%M:%S", &tmv);
     report_log_line(level, buf);
-    fprintf(stderr, "[%s] %s\n", level, buf);
+    fprintf(stderr, "%s [%s] %s\n", ts, level, buf);          /* every line carries its date and time, also in sgba_launch.log */
     if (g_log) { fprintf(g_log, "%s %s %s\n", ts, level, buf); fflush(g_log); }
 }
 

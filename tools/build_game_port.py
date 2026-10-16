@@ -23,12 +23,20 @@ LAUNCHER = """#!/bin/bash
 # @NAME@: starts the SGBA emulator (installed with GitROMs) on this game's single .sgba file.
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GAMEDIR="$HERE/@SLUG@-game"
-if [ ! -f "$HERE/SGBA.sh" ]; then
-  MSG="@NAME@ needs the SGBA emulator. Open GitROMs, choose [Check for updates] and install SGBA emulator."
-  echo "$MSG" > "$GAMEDIR/launch.log"
-  [ -w /dev/tty1 ] && printf '\\033c%s\\n' "$MSG" > /dev/tty1 2>/dev/null && sleep 6
+LOG="$GAMEDIR/launch.log"
+stop() {  # $1 = what is wrong. Said on screen and written, with the time, to the launch log: a quiet exit would look like a crash.
+  mkdir -p "$GAMEDIR" 2>/dev/null
+  echo "$(date '+%F %T') $1" >> "$LOG" 2>/dev/null
+  [ -w /dev/tty1 ] && printf '\\033c%s\\n' "$1" > /dev/tty1 2>/dev/null && sleep 8
   exit 1
+}
+if [ ! -f "$HERE/SGBA.sh" ]; then
+  stop "@NAME@ needs the SGBA emulator. Open GitROMs, choose [Check for updates] and install SGBA emulator."
 fi
+if [ ! -s "$GAMEDIR/@SLUG@.sgba" ]; then
+  stop "@NAME@: the game file is missing or empty. Open GitROMs, choose [Check for updates] and update @NAME@."
+fi
+echo "$(date '+%F %T') launch" >> "$LOG" 2>/dev/null
 exec bash "$HERE/SGBA.sh" "$GAMEDIR/@SLUG@.sgba"
 """
 

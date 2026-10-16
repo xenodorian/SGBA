@@ -34,8 +34,15 @@ ARG1="$1"       # a game path given relative to where we were started must survi
 if [ -n "$ARG1" ] && [ -e "$ARG1" ]; then ARG1="$(cd "$(dirname "$ARG1")" && pwd)/$(basename "$ARG1")"; fi
 cd "$APP" || exit 1
 LOG="$APP/sgba_launch.log"
-echo "=== launch $(date) ===" >> "$LOG" 2>&1
+echo "=== launch $(date '+%F %T') ===" >> "$LOG" 2>&1
 chmod +x "$APP/sgba" 2>/dev/null
+# An empty or damaged program file (a write that never reached the card) would "run" and exit 0, silently: say so instead.
+if [ ! -s "$APP/sgba" ] || [ "$(head -c 4 "$APP/sgba" 2>/dev/null | tail -c 3)" != "ELF" ]; then
+  MSG="The SGBA program file is damaged ($(wc -c < "$APP/sgba" 2>/dev/null || echo 0) bytes). Open GitROMs, choose [Check for updates] and update the SGBA emulator."
+  echo "$(date '+%F %T') $MSG" >> "$LOG" 2>&1
+  [ -w /dev/tty1 ] && printf '\\033c%s\\n' "$MSG" > /dev/tty1 2>/dev/null && sleep 8
+  exit 0
+fi
 [ -w /dev/tty1 ] && printf '\033c' > /dev/tty1 2>/dev/null
 export HOME="${HOME:-$APP}"
 GAME="${ARG1:-@GAME@}"
@@ -53,11 +60,11 @@ elapsed=$(( $(date +%s) - start ))
 # Retry with the bundled SDL only when the program could not start (1 = SDL or window failed, 126/127 = could not be executed).
 # A crash (134, 139) or any exit after the game ran must not start the game again.
 if { [ $rc -eq 1 ] || [ $rc -eq 126 ] || [ $rc -eq 127 ]; } && [ $elapsed -lt 20 ]; then
-  echo "first attempt failed (rc=$rc), retrying with bundled SDL" >> "$LOG"
+  echo "$(date '+%F %T') first attempt failed (rc=$rc), retrying with bundled SDL" >> "$LOG"
   run "$APP/libSDL2-sgba.so"
   rc=$?
 fi
-echo "exit $rc" >> "$LOG"
+echo "$(date '+%F %T') exit $rc" >> "$LOG"
 [ -w /dev/tty1 ] && printf '\033c' > /dev/tty1 2>/dev/null
 exit 0
 '''
